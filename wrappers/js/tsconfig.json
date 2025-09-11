@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "module": "ES2022",
+    "moduleResolution": "Node",
+    "outDir": "lib",
+    "sourceMap": true,
+    "strict": false,
+    "target": "ES2022",
+    "allowSyntheticDefaultImports": true
+  },
+  "include": [
+    "src/index-wasm.ts",
+    "src/index-node.ts",
+    "src/makeApi.ts",
+    "src/types/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

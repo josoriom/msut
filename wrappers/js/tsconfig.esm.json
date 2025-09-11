@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ES2022",
+    "outDir": "lib-esm",
+    "declaration": false
+  },
+  "include": [
+    "src/index.ts",
+    "src/index-wasm.ts",
+    "src/makeApi.ts",
+    "src/types/**/*.d.ts"
+  ]
+}

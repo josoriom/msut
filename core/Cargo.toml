@@ -1,0 +1,26 @@
+[package]
+name = "msut"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "msut"
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+# debug = true
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+
+[dependencies]
+base64 = "0.22.1"
+memchr = "2.7.5"
+miniz_oxide = "0.8.9"
+rayon = "1.11.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
+
+[target.aarch64-pc-windows-gnullvm]
+linker = "aarch64-w64-mingw32-gcc"

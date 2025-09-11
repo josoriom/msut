@@ -1,0 +1,65 @@
+{
+  "name": "msut",
+  "version": "0.1.0",
+  "description": "ULCMS: Rust core with WASM bindings",
+  "license": "MIT",
+  "type": "module",
+  "main": "./lib/index-node.js",
+  "module": "./lib/index-node.js",
+  "types": "./lib/index-node.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index-node.d.ts",
+      "browser": "./dist/index-wasm.js",
+      "node": "./lib/index-node.js",
+      "import": "./lib/index-node.js",
+      "require": "./lib/index-node.js",
+      "default": "./dist/index-wasm.js"
+    }
+  },
+  "files": [
+    "dist/**",
+    "lib/**",
+    "native/**",
+    "binding.gyp",
+    "src/bridge.cc"
+  ],
+  "gypfile": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "install": "node-gyp rebuild",
+    "build": "npm run tsc && npx webpack && cp ../../artifacts/wasm/msut.wasm dist/msut.wasm",
+    "check-types": "tsc --noEmit",
+    "clean": "rimraf dist lib types",
+    "eslint": "eslint src --cache",
+    "eslint-fix": "npm run eslint -- --fix",
+    "prepack": "npm run tsc",
+    "prettier": "prettier --check src",
+    "prettier-write": "prettier --write src",
+    "test": "npm run check-types && npm run eslint && npm run prettier && npm run test-only",
+    "test-coverage": "npm run test-only -- --coverage",
+    "test-only": "jest",
+    "tsc": "rimraf dist lib lib-esm types && npm run tsc-cjs && npm run tsc-esm && npm run copy-wasm",
+    "tsc-cjs": "tsc --project tsconfig.cjs.json && node -e \"const fs=require('fs');fs.mkdirSync('lib',{recursive:true});fs.writeFileSync('lib/package.json','{\\n  \\\"type\\\": \\\"commonjs\\\"\\n}\\n')\"",
+    "tsc-esm": "tsc --project tsconfig.esm.json",
+    "copy-wasm": "cp ../../artifacts/wasm/msut.wasm lib/msut.wasm && cp ../../artifacts/wasm/msut.wasm lib-esm/msut.wasm"
+  },
+  "dependencies": {
+    "ml-spectra-processing": "14.5.0",
+    "node-addon-api": "^8.5.0"
+  },
+  "optionalDependencies": {
+    "node-gyp": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "@types/webpack": "^5.28.5",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2",
+    "webpack": "^5.101.0",
+    "webpack-cli": "^6.0.1"
+  }
+}

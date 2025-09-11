@@ -1,0 +1,13 @@
+Cargo.lock
+**/node_modules
+**/__pycache__
+**/.DS_Store
+**/lib
+**/lib-esm
+**/dist
+**/data
+**/target
+**/target-linux-amd64
+**/target-linux-arm64
+**/target-windows-amd64
+**/target-windows-arm64

@@ -1,0 +1,9 @@
+Package: msut
+Type: Package
+Title: msut
+Version: 0.1.0
+Authors@R: person("J", "Osorio", email = "josoriom93@gmail.com", role = c("aut","cre"))
+Description: Base-R bindings to the msut native library built in Rust.
+License: MIT
+Encoding: UTF-8
+LazyData: true

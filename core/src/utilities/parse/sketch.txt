@@ -1,0 +1,117 @@
++----------------------------------------------------+
+| HEADER (64 bytes total)                            |
+|  0..3    (4)  label = "BIN1" (ASCII)               |
+|  4..7    (4)  spectrum_count = u32                 |
+|  8..11   (4)  chrom_count    = u32                 |
+| 12       (1)  chrom_x_fmt (1=f32, 2=f64)           |
+| 13       (1)  chrom_y_fmt (1=f32, 2=f64)           |
+| 14       (1)  spect_x_fmt (1=f32, 2=f64)           |
+| 15       (1)  spect_y_fmt (1=f32, 2=f64)           |
+| 16..23   (8)  spec_index_off  = u64  (A)           |
+| 24..31   (8)  chrom_index_off = u64  (B)           |
+| 32..39   (8)  spec_meta_off   = u64  (C)           |
+| 40..47   (8)  chrom_meta_off  = u64  (D)           |
+| 48..55   (8)  data_off        = u64  (E)           |
+| 56..63   (8)  total_size      = u64                |
++----------------------------------------------------+
+| SPECTRUM INDEX (A)                                 |
+|   each entry = 32 bytes; count = spectrum_count    |
+|   entry[i]:                                        |
+|     0..7   mz_off      (u64)                       |
+|     8..11  mz_len      (u32)                       |
+|     12..19 inten_off   (u64)                       |
+|     20..23 inten_len   (u32)                       |
+|     24..31 reserved    (8B=0)                      |
++----------------------------------------------------+
+| CHROM INDEX (B)                                    |
+|   each entry = 32 bytes; count = chrom_count       |
+|   entry[i]:                                        |
+|     0..7   time_off    (u64)                       |
+|     8..11  time_len    (u32)                       |
+|     12..19 inten_off   (u64)                       | 
+|     20..23 inten_len   (u32)                       |
+|     24..31 reserved    (8B=0)                      |
++----------------------------------------------------+
+| SPECTRUM META (C)                                  |
+|   each entry = 104 bytes; count = spectrum_count   |
+|   entry[i]:                                        |
+|     0..3    index               (u32)              |
+|     4..7    array_length        (u32)              |
+|     8       ms_level            (u8)               | 255=None
+|     9       polarity            (u8)               | 0=pos, 1=neg, 255=None
+|     10      spectrum_type       (u8)               | 0=profile, 1=centroid, 255=None
+|     11      reserved            (u8)               |
+|     12..19  retention_time      (f64)              |
+|     20..27  scan_window_lower   (f64)              |
+|     28..35  scan_window_upper   (f64)              |
+|     36..43  total_ion_current   (f64)              |
+|     44..51  base_peak_intensity (f64)              |
+|     52..59  base_peak_mz        (f64)              |
+|     60..67  precursor_target_mz (f64)              |
+|     68..75  precursor_low_off   (f64)              |
+|     76..83  precursor_up_off    (f64)              |
+|     84..91  precursor_sel_ion   (f64)              | (12B=0, align to 8)  
+|     92..103 reserved                               |
+|                                                    |
+|   Notes: If value is absent, writer stores -1.0    |
++----------------------------------------------------+
+| CHROM META (D)                                     |
+|   each entry = 16 bytes; count = chrom_count       |
+|   entry[i]:                                        |
+|     0..3   index         (u32)                     |
+|     4..7   array_length  (u32)                     |
+|     8..15 reserved       (8B=0)                    |
++----------------------------------------------------+
+| RAWDATA (E)                                        |
+|   raw arrays packed back-to-back in declared       |
+|   formats (see fmt bytes):                         |
+|   [all spectra m/z]          -> spect_x_fmt        |
+|   [all spectra intensities]  -> spect_y_fmt        |
+|   [all chrom times]          -> chrom_x_fmt        |
+|   [all chrom intensities]    -> chrom_y_fmt        |
+|   (array starts may be 8B aligned; *_len are       |
+|    element counts, not bytes)                      |
++----------------------------------------------------+
+
++----------------------------------------------------+
+| HEADER (64 bytes total)                            |
+|  0..3    (4)  label = "BINS" (ASCII)               |
+|  4..7    (4)  spectrum_count = u32                 |
+|  8..11   (4)  chrom_count    = u32                 |
+| 12       (1)  chrom_x_fmt (1=f32, 2=f64)           |
+| 13       (1)  chrom_y_fmt (1=f32, 2=f64)           |
+| 14       (1)  spect_x_fmt (1=f32, 2=f64)           |
+| 15       (1)  spect_y_fmt (1=f32, 2=f64)           |
+| 16..23   (8)  spec_index_off  = u64  (A)           |
+| 24..31   (8)  chrom_index_off = u64  (B)           |
+| 32..39   (8)  reserved = 0   (no SPECTRUM META)    |
+| 40..47   (8)  reserved = 0   (no CHROM META)       |
+| 48..55   (8)  data_off        = u64  (C)           |
+| 56..63   (8)  total_size      = u64                |
++----------------------------------------------------+
+| SPECTRUM INDEX (A)                                 |
+|   each entry = 32 bytes; count = spectrum_count    |
+|   entry[i]:                                        |
+|     0..7   mz_off      (u64)                       |
+|     8..11  mz_len      (u32)  [elements]           |
+|     12..19 inten_off   (u64)                       |
+|     20..23 inten_len   (u32)  [elements]           |
+|     24..31 reserved    (8B=0)                      |
++----------------------------------------------------+
+| CHROM INDEX (B)                                    |
+|   each entry = 32 bytes; count = chrom_count       |
+|   entry[i]:                                        |
+|     0..7   time_off    (u64)                       |
+|     8..11  time_len    (u32)  [elements]           |
+|     12..19 inten_off   (u64)                       |
+|     20..23 inten_len   (u32)  [elements]           |
+|     24..31 reserved    (8B=0)                      |
++----------------------------------------------------+
+| RAWDATA (C)                                        |
+|   arrays packed back-to-back; 8B-aligned starts    |
+|   [all spectra m/z]          -> spect_x_fmt        |
+|   [all spectra intensities]  -> spect_y_fmt        |
+|   [all chrom times]          -> chrom_x_fmt        |
+|   [all chrom intensities]    -> chrom_y_fmt        |
+|   *_len are element counts; values are LE          |
++----------------------------------------------------+

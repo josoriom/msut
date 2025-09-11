@@ -1,0 +1,11 @@
+useDynLib(msut, .registration = TRUE)
+
+export(parse_mzml)
+export(bin_to_json)
+export(bin_to_df)
+export(parse_mzml_to_json)
+export(get_peak)
+export(get_peaks_from_eic)
+export(bin_to_eic)
+export(find_peaks)
+export(get_peaks_from_chrom)

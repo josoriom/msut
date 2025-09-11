@@ -1,0 +1,2 @@
+PKG_CFLAGS = -std=gnu2x
+PKG_LIBS   =
