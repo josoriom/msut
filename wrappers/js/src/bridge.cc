@@ -46,11 +46,10 @@ typedef struct
 
 static_assert(sizeof(CPeakPOptions) == 48, "CPeakPOptions must be 48 bytes");
 
-typedef int32_t (*fn_parse_mzml)(const unsigned char *, size_t, unsigned char, Buf *);
-typedef int32_t (*fn_parse_mzml_to_json)(const unsigned char *, size_t, unsigned char, Buf *, Buf *);
-typedef int32_t (*fn_bin_to_json)(const unsigned char *, size_t, unsigned char, Buf *);
+typedef int32_t (*fn_parse_mzml)(const unsigned char *, size_t, Buf *);
+typedef int32_t (*fn_bin_to_json)(const unsigned char *, size_t, Buf *);
 typedef int32_t (*fn_get_peak)(const double *, const float *, size_t, double, double, const CPeakPOptions *, Buf *);
-typedef int32_t (*fn_bin_to_eic)(const unsigned char *, size_t, const unsigned char *, size_t, double, double, double, double, Buf *, Buf *);
+typedef int32_t (*fn_calculate_eic)(const unsigned char *, size_t, const unsigned char *, size_t, double, double, double, double, Buf *, Buf *);
 typedef float (*fn_find_noise_level)(const float *, size_t);
 typedef int32_t (*fn_get_peaks_from_eic)(
     const unsigned char *, size_t,
@@ -67,10 +66,9 @@ typedef void (*fn_free_)(unsigned char *, size_t);
 typedef struct
 {
   fn_parse_mzml parse_mzml;
-  fn_parse_mzml_to_json parse_mzml_to_json;
   fn_bin_to_json bin_to_json;
   fn_get_peak get_peak;
-  fn_bin_to_eic bin_to_eic;
+  fn_calculate_eic calculate_eic;
   fn_find_noise_level find_noise_level;
   fn_get_peaks_from_eic C_get_peaks_from_eic;
   fn_get_peaks_from_chrom C_get_peaks_from_chrom;
@@ -113,24 +111,25 @@ static int abi_load(const char *path, const char **err)
       *err = last_err;
     return -1;
   }
+
   if (resolve_required((void **)&ABI.parse_mzml, "parse_mzml"))
-    goto fail;
-  if (resolve_required((void **)&ABI.parse_mzml_to_json, "parse_mzml_to_json"))
     goto fail;
   if (resolve_required((void **)&ABI.bin_to_json, "bin_to_json"))
     goto fail;
   if (resolve_required((void **)&ABI.get_peak, "get_peak"))
     goto fail;
-  if (resolve_required((void **)&ABI.bin_to_eic, "bin_to_eic"))
-    goto fail;
+
+  resolve_optional2((void **)&ABI.calculate_eic, "calculate_eic");
   resolve_optional2((void **)&ABI.find_noise_level, "find_noise_level", NULL);
   resolve_optional2((void **)&ABI.C_get_peaks_from_eic, "C_get_peaks_from_eic", "get_peaks_from_eic");
   resolve_optional2((void **)&ABI.C_get_peaks_from_chrom, "C_get_peaks_from_chrom", "get_peaks_from_chrom");
   resolve_optional2((void **)&ABI.find_peaks, "find_peaks", "C_find_peaks");
+
   ABI.free_ = (fn_free_)DLSYM(LIB_HANDLE, "free_");
   if (!ABI.free_)
     goto fail;
   return 0;
+
 fail:
   if (LIB_HANDLE)
   {
@@ -226,11 +225,8 @@ static Napi::Value ParseMzML(const Napi::CallbackInfo &info)
   ThrowIfMissing(env, (void *)ABI.parse_mzml, "parse_mzml");
   ThrowIfMissing(env, (void *)ABI.free_, "free_");
   Napi::Buffer<uint8_t> input = info[0].As<Napi::Buffer<uint8_t>>();
-  uint8_t slim = 0;
-  if (info.Length() > 1 && info[1].IsBoolean())
-    slim = info[1].As<Napi::Boolean>().Value() ? 1 : 0;
   Buf out = {nullptr, 0};
-  int32_t rc = ABI.parse_mzml(input.Data(), (size_t)input.Length(), slim, &out);
+  int32_t rc = ABI.parse_mzml(input.Data(), (size_t)input.Length(), &out);
   if (rc != 0)
   {
     if (out.ptr && ABI.free_)
@@ -243,52 +239,14 @@ static Napi::Value ParseMzML(const Napi::CallbackInfo &info)
   return TakeBuffer(env, &out);
 }
 
-static Napi::Value ParseMzMLToJson(const Napi::CallbackInfo &info)
-{
-  Napi::Env env = info.Env();
-  ThrowIfMissing(env, (void *)ABI.parse_mzml_to_json, "parse_mzml_to_json");
-  ThrowIfMissing(env, (void *)ABI.free_, "free_");
-  Napi::Buffer<uint8_t> input = info[0].As<Napi::Buffer<uint8_t>>();
-  uint8_t slim = 0;
-  if (info.Length() > 1 && info[1].IsBoolean())
-    slim = info[1].As<Napi::Boolean>().Value() ? 1 : 0;
-  Buf json_buf = {nullptr, 0};
-  Buf blob_buf = {nullptr, 0};
-  int32_t rc = ABI.parse_mzml_to_json(input.Data(), (size_t)input.Length(), slim, &json_buf, &blob_buf);
-  if (rc != 0)
-  {
-    if (json_buf.ptr && ABI.free_)
-      ABI.free_(json_buf.ptr, json_buf.len);
-    if (blob_buf.ptr && ABI.free_)
-      ABI.free_(blob_buf.ptr, blob_buf.len);
-    std::string msg = "parse_mzml_to_json: ";
-    msg += CodeMessage(rc);
-    Napi::Error::New(env, msg).ThrowAsJavaScriptException();
-    return env.Undefined();
-  }
-  std::string json_text((const char *)json_buf.ptr, json_buf.len);
-  if (ABI.free_)
-    ABI.free_(json_buf.ptr, json_buf.len);
-  Napi::Buffer<uint8_t> blob = Napi::Buffer<uint8_t>::Copy(env, blob_buf.ptr, blob_buf.len);
-  if (ABI.free_)
-    ABI.free_(blob_buf.ptr, blob_buf.len);
-  Napi::Object out = Napi::Object::New(env);
-  out.Set("json", Napi::String::New(env, json_text));
-  out.Set("blob", blob);
-  return out;
-}
-
 static Napi::Value BinToJson(const Napi::CallbackInfo &info)
 {
   Napi::Env env = info.Env();
   ThrowIfMissing(env, (void *)ABI.bin_to_json, "bin_to_json");
   ThrowIfMissing(env, (void *)ABI.free_, "free_");
   Napi::Buffer<uint8_t> bin = info[0].As<Napi::Buffer<uint8_t>>();
-  uint8_t pretty = 0;
-  if (info.Length() > 1 && info[1].IsBoolean())
-    pretty = info[1].As<Napi::Boolean>().Value() ? 1 : 0;
   Buf out = {nullptr, 0};
-  int32_t rc = ABI.bin_to_json(bin.Data(), (size_t)bin.Length(), pretty, &out);
+  int32_t rc = ABI.bin_to_json(bin.Data(), (size_t)bin.Length(), &out);
   if (rc != 0)
   {
     if (out.ptr && ABI.free_)
@@ -337,10 +295,10 @@ static Napi::Value GetPeak(const Napi::CallbackInfo &info)
   return Napi::String::New(env, json_text);
 }
 
-static Napi::Value BinToEic(const Napi::CallbackInfo &info)
+static Napi::Value CalculateEic(const Napi::CallbackInfo &info)
 {
   Napi::Env env = info.Env();
-  ThrowIfMissing(env, (void *)ABI.bin_to_eic, "bin_to_eic");
+  ThrowIfMissing(env, (void *)ABI.calculate_eic, "calculate_eic");
   ThrowIfMissing(env, (void *)ABI.free_, "free_");
   Napi::Buffer<uint8_t> bin = info[0].As<Napi::Buffer<uint8_t>>();
   std::string targets = info[1].As<Napi::String>();
@@ -350,17 +308,18 @@ static Napi::Value BinToEic(const Napi::CallbackInfo &info)
   double mz_tol = info[5].As<Napi::Number>().DoubleValue();
   Buf x_buf = {nullptr, 0};
   Buf y_buf = {nullptr, 0};
-  int32_t rc = ABI.bin_to_eic(
+  int32_t rc = ABI.calculate_eic(
       bin.Data(), (size_t)bin.Length(),
       reinterpret_cast<const unsigned char *>(targets.data()), targets.size(),
-      from_rt, to_rt, ppm_tol, mz_tol, &x_buf, &y_buf);
+      from_rt, to_rt, ppm_tol, mz_tol,
+      &x_buf, &y_buf);
   if (rc != 0)
   {
     if (x_buf.ptr && ABI.free_)
       ABI.free_(x_buf.ptr, x_buf.len);
     if (y_buf.ptr && ABI.free_)
       ABI.free_(y_buf.ptr, y_buf.len);
-    std::string msg = "bin_to_eic: ";
+    std::string msg = "calculate_eic: ";
     msg += CodeMessage(rc);
     Napi::Error::New(env, msg).ThrowAsJavaScriptException();
     return env.Undefined();
@@ -406,18 +365,26 @@ static Napi::Value GetPeaksFromEic(const Napi::CallbackInfo &info)
     return env.Undefined();
   }
   ThrowIfMissing(env, (void *)ABI.free_, "free_");
+
   Napi::Buffer<uint8_t> bin = info[0].As<Napi::Buffer<uint8_t>>();
   Napi::Float64Array rts_arr = info[1].As<Napi::Float64Array>();
   Napi::Float64Array mzs_arr = info[2].As<Napi::Float64Array>();
   Napi::Float64Array rng_arr = info[3].As<Napi::Float64Array>();
+
   const double *rts = (const double *)((uint8_t *)rts_arr.ArrayBuffer().Data() + rts_arr.ByteOffset());
   const double *mzs = (const double *)((uint8_t *)mzs_arr.ArrayBuffer().Data() + mzs_arr.ByteOffset());
   const double *rng = (const double *)((uint8_t *)rng_arr.ArrayBuffer().Data() + rng_arr.ByteOffset());
   size_t count = rts_arr.ElementLength();
+
   const uint32_t *offs_ptr = nullptr;
   const uint32_t *lens_ptr = nullptr;
   const unsigned char *ids_buf_ptr = nullptr;
   size_t ids_buf_len = 0;
+
+  Napi::Buffer<uint32_t> offs_js;
+  Napi::Buffer<uint32_t> lens_js;
+  Napi::Buffer<unsigned char> ids_js;
+
   if (info.Length() > 4 && !info[4].IsUndefined() && !info[4].IsNull())
   {
     Napi::Array ids = info[4].As<Napi::Array>();
@@ -454,18 +421,23 @@ static Napi::Value GetPeaksFromEic(const Napi::CallbackInfo &info)
         cur += s.size();
       }
     }
-    offs_ptr = (const uint32_t *)Napi::Buffer<uint32_t>::Copy(env, offs.data(), offs.size()).Data();
-    lens_ptr = (const uint32_t *)Napi::Buffer<uint32_t>::Copy(env, lens.data(), lens.size()).Data();
-    Napi::Buffer<unsigned char> ids_js = Napi::Buffer<unsigned char>::Copy(env, ids_buf.data(), ids_buf.size());
-    ids_buf_ptr = ids_js.Data();
+    offs_js = Napi::Buffer<uint32_t>::Copy(env, offs.data(), offs.size());
+    lens_js = Napi::Buffer<uint32_t>::Copy(env, lens.data(), lens.size());
+    ids_js = Napi::Buffer<unsigned char>::Copy(env, ids_buf.data(), ids_buf.size());
+    offs_ptr = (const uint32_t *)offs_js.Data();
+    lens_ptr = (const uint32_t *)lens_js.Data();
+    ids_buf_ptr = (const unsigned char *)ids_js.Data();
     ids_buf_len = ids_js.Length();
   }
+
   double from_left = info[5].As<Napi::Number>().DoubleValue();
   double to_right = info[6].As<Napi::Number>().DoubleValue();
+
   CPeakPOptions opts;
   const CPeakPOptions *p_opts = nullptr;
   if (info.Length() > 7)
     p_opts = ReadOptionsBuf(info[7], &opts);
+
   size_t cores = 1;
   if (info.Length() > 8 && info[8].IsNumber())
   {
@@ -473,6 +445,7 @@ static Napi::Value GetPeaksFromEic(const Napi::CallbackInfo &info)
     if (v > 0)
       cores = (size_t)v;
   }
+
   Buf out = {nullptr, 0};
   int32_t rc = ABI.C_get_peaks_from_eic(
       bin.Data(), (size_t)bin.Length(),
@@ -483,7 +456,7 @@ static Napi::Value GetPeaksFromEic(const Napi::CallbackInfo &info)
   {
     if (out.ptr && ABI.free_)
       ABI.free_(out.ptr, out.len);
-    std::string msg = "C_get_peaks_from_eic: ";
+    std::string msg = "get_peaks_from_eic: ";
     msg += CodeMessage(rc);
     Napi::Error::New(env, msg).ThrowAsJavaScriptException();
     return env.Undefined();
@@ -503,18 +476,22 @@ static Napi::Value GetPeaksFromChrom(const Napi::CallbackInfo &info)
     return env.Undefined();
   }
   ThrowIfMissing(env, (void *)ABI.free_, "free_");
+
   Napi::Buffer<uint8_t> bin = info[0].As<Napi::Buffer<uint8_t>>();
   Napi::Uint32Array idx_arr = info[1].As<Napi::Uint32Array>();
   Napi::Float64Array rts_arr = info[2].As<Napi::Float64Array>();
   Napi::Float64Array rng_arr = info[3].As<Napi::Float64Array>();
+
   const uint32_t *idx = (const uint32_t *)((uint8_t *)idx_arr.ArrayBuffer().Data() + idx_arr.ByteOffset());
   const double *rts = (const double *)((uint8_t *)rts_arr.ArrayBuffer().Data() + rts_arr.ByteOffset());
   const double *rng = (const double *)((uint8_t *)rng_arr.ArrayBuffer().Data() + rng_arr.ByteOffset());
   size_t count = rts_arr.ElementLength();
+
   CPeakPOptions opts;
   const CPeakPOptions *p_opts = nullptr;
   if (info.Length() > 4)
     p_opts = ReadOptionsBuf(info[4], &opts);
+
   size_t cores = 1;
   if (info.Length() > 5 && info[5].IsNumber())
   {
@@ -522,6 +499,7 @@ static Napi::Value GetPeaksFromChrom(const Napi::CallbackInfo &info)
     if (v > 0)
       cores = (size_t)v;
   }
+
   Buf out = {nullptr, 0};
   int32_t rc = ABI.C_get_peaks_from_chrom(
       bin.Data(), (size_t)bin.Length(),
@@ -530,7 +508,7 @@ static Napi::Value GetPeaksFromChrom(const Napi::CallbackInfo &info)
   {
     if (out.ptr && ABI.free_)
       ABI.free_(out.ptr, out.len);
-    std::string msg = "C_get_peaks_from_chrom: ";
+    std::string msg = "get_peaks_from_chrom: ";
     msg += CodeMessage(rc);
     Napi::Error::New(env, msg).ThrowAsJavaScriptException();
     return env.Undefined();
@@ -550,15 +528,18 @@ static Napi::Value FindPeaks(const Napi::CallbackInfo &info)
     return env.Undefined();
   }
   ThrowIfMissing(env, (void *)ABI.free_, "free_");
+
   Napi::Float64Array x_arr = info[0].As<Napi::Float64Array>();
   Napi::Float32Array y_arr = info[1].As<Napi::Float32Array>();
   CPeakPOptions opts;
   const CPeakPOptions *p_opts = nullptr;
   if (info.Length() > 2)
     p_opts = ReadOptionsBuf(info[2], &opts);
+
   double *x_ptr = (double *)((uint8_t *)x_arr.ArrayBuffer().Data() + x_arr.ByteOffset());
   float *y_ptr = (float *)((uint8_t *)y_arr.ArrayBuffer().Data() + y_arr.ByteOffset());
   size_t n = x_arr.ElementLength();
+
   Buf out = {nullptr, 0};
   int32_t rc = ABI.find_peaks(x_ptr, y_ptr, n, p_opts, &out);
   if (rc != 0)
@@ -580,10 +561,9 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports)
 {
   exports.Set("bind", Napi::Function::New(env, Bind));
   exports.Set("parseMzML", Napi::Function::New(env, ParseMzML));
-  exports.Set("parseMzMLToJson", Napi::Function::New(env, ParseMzMLToJson));
   exports.Set("binToJson", Napi::Function::New(env, BinToJson));
   exports.Set("getPeak", Napi::Function::New(env, GetPeak));
-  exports.Set("binToEic", Napi::Function::New(env, BinToEic));
+  exports.Set("calculateEic", Napi::Function::New(env, CalculateEic));
   exports.Set("findNoiseLevel", Napi::Function::New(env, FindNoiseLevel));
   exports.Set("getPeaksFromEic", Napi::Function::New(env, GetPeaksFromEic));
   exports.Set("getPeaksFromChrom", Napi::Function::New(env, GetPeaksFromChrom));
