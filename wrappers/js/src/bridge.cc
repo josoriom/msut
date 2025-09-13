@@ -9,7 +9,6 @@
 #include <string.h>
 #include <string>
 #include <vector>
-#include <cmath>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -44,6 +43,8 @@ typedef struct
   int32_t window_size;
   int32_t sn_ratio;
 } CPeakPOptions;
+
+static_assert(sizeof(CPeakPOptions) == 48, "CPeakPOptions must be 48 bytes");
 
 typedef int32_t (*fn_parse_mzml)(const unsigned char *, size_t, unsigned char, Buf *);
 typedef int32_t (*fn_parse_mzml_to_json)(const unsigned char *, size_t, unsigned char, Buf *, Buf *);
@@ -83,9 +84,7 @@ static DLIB LIB_HANDLE = NULL;
 static int resolve_required(void **fn, const char *name)
 {
   *fn = DLSYM(LIB_HANDLE, name);
-  if (*fn)
-    return 0;
-  return -1;
+  return *fn ? 0 : -1;
 }
 
 static void resolve_optional2(void **fn, const char *s1, const char *s2)
@@ -177,35 +176,16 @@ static Napi::Buffer<uint8_t> TakeBuffer(Napi::Env env, Buf *buf)
   return out;
 }
 
-static const CPeakPOptions *ReadOptions(Napi::Value value, CPeakPOptions *out)
+static const CPeakPOptions *ReadOptionsBuf(Napi::Value value, CPeakPOptions *out)
 {
-  if (!value.IsObject())
+  if (value.IsUndefined() || value.IsNull())
     return nullptr;
-  Napi::Object obj = value.As<Napi::Object>();
-  out->integral_threshold = NAN;
-  out->intensity_threshold = NAN;
-  out->noise = NAN;
-  out->width_threshold = 0;
-  out->auto_noise = 0;
-  out->allow_overlap = 0;
-  out->window_size = 0;
-  out->sn_ratio = 0;
-  if (obj.Has("integralThreshold") && obj.Get("integralThreshold").IsNumber())
-    out->integral_threshold = obj.Get("integralThreshold").As<Napi::Number>().DoubleValue();
-  if (obj.Has("intensityThreshold") && obj.Get("intensityThreshold").IsNumber())
-    out->intensity_threshold = obj.Get("intensityThreshold").As<Napi::Number>().DoubleValue();
-  if (obj.Has("widthThreshold") && obj.Get("widthThreshold").IsNumber())
-    out->width_threshold = (int32_t)obj.Get("widthThreshold").As<Napi::Number>().Int64Value();
-  if (obj.Has("noise") && obj.Get("noise").IsNumber())
-    out->noise = obj.Get("noise").As<Napi::Number>().DoubleValue();
-  if (obj.Has("autoNoise") && obj.Get("autoNoise").IsBoolean())
-    out->auto_noise = obj.Get("autoNoise").As<Napi::Boolean>().Value() ? 1 : 0;
-  if (obj.Has("allowOverlap") && obj.Get("allowOverlap").IsBoolean())
-    out->allow_overlap = obj.Get("allowOverlap").As<Napi::Boolean>().Value() ? 1 : 0;
-  if (obj.Has("windowSize") && obj.Get("windowSize").IsNumber())
-    out->window_size = (int32_t)obj.Get("windowSize").As<Napi::Number>().Int64Value();
-  if (obj.Has("snRatio") && obj.Get("snRatio").IsNumber())
-    out->sn_ratio = (int32_t)obj.Get("snRatio").As<Napi::Number>().Int64Value();
+  if (!value.IsBuffer())
+    return nullptr;
+  Napi::Buffer<uint8_t> buf = value.As<Napi::Buffer<uint8_t>>();
+  if (buf.Length() < sizeof(CPeakPOptions))
+    return nullptr;
+  memcpy(out, buf.Data(), sizeof(CPeakPOptions));
   return out;
 }
 
@@ -336,7 +316,7 @@ static Napi::Value GetPeak(const Napi::CallbackInfo &info)
   CPeakPOptions opts;
   const CPeakPOptions *p_opts = nullptr;
   if (info.Length() > 4)
-    p_opts = ReadOptions(info[4], &opts);
+    p_opts = ReadOptionsBuf(info[4], &opts);
   double *x_ptr = (double *)((uint8_t *)x_arr.ArrayBuffer().Data() + x_arr.ByteOffset());
   float *y_ptr = (float *)((uint8_t *)y_arr.ArrayBuffer().Data() + y_arr.ByteOffset());
   size_t n = x_arr.ElementLength();
@@ -373,8 +353,7 @@ static Napi::Value BinToEic(const Napi::CallbackInfo &info)
   int32_t rc = ABI.bin_to_eic(
       bin.Data(), (size_t)bin.Length(),
       reinterpret_cast<const unsigned char *>(targets.data()), targets.size(),
-      from_rt, to_rt, ppm_tol, mz_tol,
-      &x_buf, &y_buf);
+      from_rt, to_rt, ppm_tol, mz_tol, &x_buf, &y_buf);
   if (rc != 0)
   {
     if (x_buf.ptr && ABI.free_)
@@ -386,8 +365,7 @@ static Napi::Value BinToEic(const Napi::CallbackInfo &info)
     Napi::Error::New(env, msg).ThrowAsJavaScriptException();
     return env.Undefined();
   }
-  size_t nx = x_buf.len / 8;
-  size_t ny = y_buf.len / 4;
+  size_t nx = x_buf.len / 8, ny = y_buf.len / 4;
   Napi::ArrayBuffer abx = Napi::ArrayBuffer::New(env, nx * 8);
   Napi::ArrayBuffer aby = Napi::ArrayBuffer::New(env, ny * 4);
   memcpy(abx.Data(), x_buf.ptr, nx * 8);
@@ -440,14 +418,11 @@ static Napi::Value GetPeaksFromEic(const Napi::CallbackInfo &info)
   const uint32_t *lens_ptr = nullptr;
   const unsigned char *ids_buf_ptr = nullptr;
   size_t ids_buf_len = 0;
-  std::vector<uint32_t> offs;
-  std::vector<uint32_t> lens;
-  std::vector<unsigned char> ids_buf;
   if (info.Length() > 4 && !info[4].IsUndefined() && !info[4].IsNull())
   {
     Napi::Array ids = info[4].As<Napi::Array>();
-    offs.resize(count, 0);
-    lens.resize(count, 0);
+    std::vector<uint32_t> offs(count, 0);
+    std::vector<uint32_t> lens(count, 0);
     size_t total = 0;
     std::vector<std::string> tmp;
     tmp.reserve(count);
@@ -457,14 +432,15 @@ static Napi::Value GetPeaksFromEic(const Napi::CallbackInfo &info)
       if (v.IsString())
       {
         std::string s = v.As<Napi::String>().Utf8Value();
-        tmp.push_back(s);
         total += s.size();
+        tmp.push_back(std::move(s));
       }
       else
       {
-        tmp.push_back(std::string());
+        tmp.emplace_back();
       }
     }
+    std::vector<unsigned char> ids_buf;
     ids_buf.resize(total);
     size_t cur = 0;
     for (size_t i = 0; i < count; i++)
@@ -478,17 +454,18 @@ static Napi::Value GetPeaksFromEic(const Napi::CallbackInfo &info)
         cur += s.size();
       }
     }
-    offs_ptr = offs.data();
-    lens_ptr = lens.data();
-    ids_buf_ptr = ids_buf.data();
-    ids_buf_len = ids_buf.size();
+    offs_ptr = (const uint32_t *)Napi::Buffer<uint32_t>::Copy(env, offs.data(), offs.size()).Data();
+    lens_ptr = (const uint32_t *)Napi::Buffer<uint32_t>::Copy(env, lens.data(), lens.size()).Data();
+    Napi::Buffer<unsigned char> ids_js = Napi::Buffer<unsigned char>::Copy(env, ids_buf.data(), ids_buf.size());
+    ids_buf_ptr = ids_js.Data();
+    ids_buf_len = ids_js.Length();
   }
   double from_left = info[5].As<Napi::Number>().DoubleValue();
   double to_right = info[6].As<Napi::Number>().DoubleValue();
   CPeakPOptions opts;
   const CPeakPOptions *p_opts = nullptr;
   if (info.Length() > 7)
-    p_opts = ReadOptions(info[7], &opts);
+    p_opts = ReadOptionsBuf(info[7], &opts);
   size_t cores = 1;
   if (info.Length() > 8 && info[8].IsNumber())
   {
@@ -501,8 +478,7 @@ static Napi::Value GetPeaksFromEic(const Napi::CallbackInfo &info)
       bin.Data(), (size_t)bin.Length(),
       rts, mzs, rng,
       offs_ptr, lens_ptr, ids_buf_ptr, ids_buf_len,
-      count, from_left, to_right,
-      p_opts, cores, &out);
+      count, from_left, to_right, p_opts, cores, &out);
   if (rc != 0)
   {
     if (out.ptr && ABI.free_)
@@ -538,7 +514,7 @@ static Napi::Value GetPeaksFromChrom(const Napi::CallbackInfo &info)
   CPeakPOptions opts;
   const CPeakPOptions *p_opts = nullptr;
   if (info.Length() > 4)
-    p_opts = ReadOptions(info[4], &opts);
+    p_opts = ReadOptionsBuf(info[4], &opts);
   size_t cores = 1;
   if (info.Length() > 5 && info[5].IsNumber())
   {
@@ -549,8 +525,7 @@ static Napi::Value GetPeaksFromChrom(const Napi::CallbackInfo &info)
   Buf out = {nullptr, 0};
   int32_t rc = ABI.C_get_peaks_from_chrom(
       bin.Data(), (size_t)bin.Length(),
-      idx, rts, rng, count,
-      p_opts, cores, &out);
+      idx, rts, rng, count, p_opts, cores, &out);
   if (rc != 0)
   {
     if (out.ptr && ABI.free_)
@@ -580,7 +555,7 @@ static Napi::Value FindPeaks(const Napi::CallbackInfo &info)
   CPeakPOptions opts;
   const CPeakPOptions *p_opts = nullptr;
   if (info.Length() > 2)
-    p_opts = ReadOptions(info[2], &opts);
+    p_opts = ReadOptionsBuf(info[2], &opts);
   double *x_ptr = (double *)((uint8_t *)x_arr.ArrayBuffer().Data() + x_arr.ByteOffset());
   float *y_ptr = (float *)((uint8_t *)y_arr.ArrayBuffer().Data() + y_arr.ByteOffset());
   size_t n = x_arr.ElementLength();

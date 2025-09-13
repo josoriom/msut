@@ -1,14 +1,12 @@
 import * as fs from "fs";
 import * as path from "path";
 
-const addonPath = path.join(__dirname, "..", "build", "Release", "msut.node");
-const native = require(addonPath);
-
 function firstExisting(...candidates: string[]) {
   for (const p of candidates) if (fs.existsSync(p)) return p;
   return candidates[0];
 }
-function platformLibPath(): string {
+
+function platformLibPath(process: NodeJS.Process): string {
   const base = path.join(__dirname, "..", "native");
   const { platform, arch } = process;
   const file =
@@ -51,17 +49,29 @@ function platformLibPath(): string {
   return path.join(dir, file);
 }
 
-if (typeof native.bind === "function") native.bind(platformLibPath());
+const addonPath = path.join(__dirname, "..", "build", "Release", "msut.node");
+const native = require(addonPath);
+if (typeof native.bind === "function") native.bind(platformLibPath(process));
+
+export type PeakOptions = Partial<{
+  integralThreshold: number;
+  intensityThreshold: number;
+  widthThreshold: number;
+  noise: number;
+  autoNoise: boolean | number;
+  allowOverlap: boolean | number;
+  windowSize: number;
+  snRatio: number;
+}>;
 
 export type Peak = {
-  id?: string;
-  mz: number;
-  ort: number;
-  rt: number;
   from: number;
   to: number;
-  intensity: number;
+  rt: number;
   integral: number;
+  intensity: number;
+  ratio: number;
+  np: number;
 };
 
 export type Target = {
@@ -76,55 +86,88 @@ export type ChromItem = {
   idx?: number;
   index?: number;
   rt: number;
-  ranges: number;
+  window?: number;
+  range?: number;
 };
 
-export type ChromPeak = Peak & { index?: number };
+export type ChromPeak = {
+  index?: number;
+  id?: string;
+  ort: number;
+  rt: number;
+  from: number;
+  to: number;
+  intensity: number;
+  integral: number;
+};
 
-export function parseMzML(
-  data: Uint8Array | ArrayBuffer,
-  opts: { slim?: boolean; json?: boolean } = {}
-) {
-  const buf =
-    data instanceof Uint8Array
-      ? Buffer.from(data)
-      : Buffer.from(new Uint8Array(data));
-  if (opts.json) {
-    const { json, blob } = native.parseMzMLToJson(buf, !!opts.slim);
-    const obj = JSON.parse(json);
-    Object.defineProperty(obj, "__bin1", { value: blob, enumerable: false });
-    return obj;
-  }
-  return native.parseMzML(buf, !!opts.slim) as Buffer;
+export function packPeakOptions(opts?: PeakOptions): Buffer | undefined {
+  if (!opts) return undefined;
+  const b = Buffer.alloc(48);
+  const f64 = (v: unknown, off: number) =>
+    b.writeDoubleLE(Number.isFinite(v as number) ? Number(v) : NaN, off);
+  const i32 = (v: unknown, off: number) =>
+    b.writeInt32LE(
+      typeof v === "boolean"
+        ? v
+          ? 1
+          : 0
+        : Number.isFinite(v as number)
+        ? (v as number) | 0
+        : 0,
+      off
+    );
+  f64(opts.integralThreshold, 0);
+  f64(opts.intensityThreshold, 8);
+  i32(opts.widthThreshold, 16);
+  f64(opts.noise, 24);
+  i32(opts.autoNoise, 32);
+  i32(opts.allowOverlap, 36);
+  i32(opts.windowSize, 40);
+  i32(opts.snRatio, 44);
+  return b;
 }
 
-export function binToJson(
-  bin: Uint8Array | ArrayBuffer,
-  pretty = false
-): string {
-  const b =
-    bin instanceof Uint8Array
-      ? Buffer.from(bin)
-      : Buffer.from(new Uint8Array(bin));
-  return native.binToJson(b, !!pretty);
+function toBuffer(v: Uint8Array | ArrayBuffer): Buffer {
+  return v instanceof Uint8Array
+    ? Buffer.from(v)
+    : Buffer.from(new Uint8Array(v));
 }
 
-export function binToEic(
+export function parseMzML(data: Uint8Array | ArrayBuffer): Buffer {
+  const buf = toBuffer(data);
+  const fn = native.parseMzml || native.parseMzML;
+  return fn(buf) as Buffer;
+}
+
+export function binToJson(bin: Uint8Array | ArrayBuffer): string {
+  const b = toBuffer(bin);
+  return native.binToJson(b) as string;
+}
+
+export function calculateEic(
   bin: Uint8Array | ArrayBuffer,
   targets: string,
   from: number,
   to: number,
-  ppmTol = 0,
-  mzTol = 0
+  ppmTol = 20,
+  mzTol = 0.005
 ) {
-  const b =
-    bin instanceof Uint8Array
-      ? Buffer.from(bin)
-      : Buffer.from(new Uint8Array(bin));
-  return native.binToEic(b, targets, from, to, ppmTol, mzTol) as {
+  const b = toBuffer(bin);
+  const fn = native.calculateEic || native.binToEic;
+  return fn(b, targets, from, to, ppmTol, mzTol) as {
     x: Float64Array;
     y: Float32Array;
   };
+}
+
+export function findPeaks(
+  x: Float64Array,
+  y: Float32Array,
+  opts?: PeakOptions
+) {
+  const s = native.findPeaks(x, y, packPeakOptions(opts));
+  return JSON.parse(s) as Peak[];
 }
 
 export function getPeak(
@@ -132,19 +175,10 @@ export function getPeak(
   y: Float32Array,
   rt: number,
   range: number,
-  opts?: Record<string, unknown>
+  opts?: PeakOptions
 ) {
-  const s = native.getPeak(x, y, rt, range, opts);
-  return JSON.parse(s);
-}
-
-export function findPeaks(
-  x: Float64Array,
-  y: Float32Array,
-  opts?: Record<string, unknown>
-) {
-  const s = native.findPeaks(x, y, opts);
-  return JSON.parse(s);
+  const s = native.getPeak(x, y, rt, range, packPeakOptions(opts));
+  return JSON.parse(s) as Peak;
 }
 
 export const findNoiseLevel = native.findNoiseLevel as (
@@ -154,11 +188,11 @@ export const findNoiseLevel = native.findNoiseLevel as (
 export function getPeaksFromEic(
   bin: Uint8Array | ArrayBuffer,
   targets: Target[],
-  fromTo: { from: number; to: number } = { from: 0.5, to: 5 },
-  options?: Record<string, unknown>,
+  fromLeft = 0.5,
+  toRight = 0.5,
+  options?: PeakOptions,
   cores = 1
-): Peak[] {
-  const { from, to } = fromTo;
+) {
   const n = targets.length;
   const rts = new Float64Array(n);
   const mzs = new Float64Array(n);
@@ -171,30 +205,38 @@ export function getPeaksFromEic(
     rng[i] = +t.ranges;
     ids[i] = t.id ?? "";
   }
-  const b =
-    bin instanceof Uint8Array
-      ? Buffer.from(bin)
-      : Buffer.from(new Uint8Array(bin));
+  const b = toBuffer(bin);
+  const optBuf = packPeakOptions(options);
   const json = native.getPeaksFromEic(
     b,
     rts,
     mzs,
     rng,
     ids,
-    from,
-    to,
-    options,
-    cores
+    +fromLeft,
+    +toRight,
+    optBuf,
+    cores | 0
   ) as string;
-  return JSON.parse(json) as Peak[];
+  return JSON.parse(json) as Array<{
+    id?: string;
+    mz: number;
+    ort: number;
+    rt: number;
+    from: number;
+    to: number;
+    intensity: number;
+    integral: number;
+    noise: number;
+  }>;
 }
 
 export function getPeaksFromChrom(
   bin: Uint8Array | ArrayBuffer,
   items: ChromItem[],
-  options?: Record<string, unknown>,
+  options?: PeakOptions,
   cores = 1
-): ChromPeak[] {
+) {
   const n = items.length;
   const idxs = new Uint32Array(n);
   const rts = new Float64Array(n);
@@ -202,35 +244,35 @@ export function getPeaksFromChrom(
   for (let i = 0; i < n; i++) {
     const it = items[i];
     const idx = Number.isFinite(it.idx)
-      ? it.idx!
+      ? (it.idx as number)
       : Number.isFinite(it.index)
       ? (it.index as number)
       : -1;
     idxs[i] = idx != null && idx >= 0 ? idx >>> 0 : 0xffffffff;
     rts[i] = +it.rt;
-    rng[i] = +it.ranges;
+    const win = it.window ?? it.range ?? 0;
+    rng[i] = +win;
   }
-  const b =
-    bin instanceof Uint8Array
-      ? Buffer.from(bin)
-      : Buffer.from(new Uint8Array(bin));
+  const b = toBuffer(bin);
+  const optBuf = packPeakOptions(options);
   const json = native.getPeaksFromChrom(
     b,
     idxs,
     rts,
     rng,
-    options,
-    cores
+    optBuf,
+    cores | 0
   ) as string;
   return JSON.parse(json) as ChromPeak[];
 }
+
 module.exports = {
   parseMzML,
   binToJson,
-  binToEic,
+  calculateEic,
   getPeak,
   findPeaks,
-  findNoiseLevel: native.findNoiseLevel as (y: Float32Array) => number,
+  findNoiseLevel,
   getPeaksFromEic,
   getPeaksFromChrom,
 };
