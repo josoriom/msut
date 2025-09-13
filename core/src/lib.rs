@@ -14,12 +14,8 @@ use utilities::{
     get_peak::get_peak as get_peak_rs,
     get_peaks_from_chrom::get_peaks_from_chrom as get_peaks_from_chrom_rs,
     get_peaks_from_eic::get_peaks_from_eic as get_peaks_from_eic_rs,
-    parse::{
-        decode::{decode, metadata_to_json},
-        encode::encode,
-        parse_mzml::parse_mzml as parse_mzml_rs,
-    },
-    scan_for_peaks::{ScanPeaksOptions, scan_for_peaks as scan_for_peaks_rs},
+    parse::{decode::decode, encode::encode, parse_mzml::parse_mzml as parse_mzml_rs},
+    scan_for_peaks::ScanPeaksOptions,
     structs::{DataXY, FromTo, Roi},
 };
 
@@ -91,7 +87,6 @@ pub unsafe extern "C" fn free_(ptr_raw: *mut u8, size: usize) {
 pub unsafe extern "C" fn parse_mzml(
     data_ptr: *const u8,
     data_len: usize,
-    slim: u8,
     out_data: *mut Buf,
 ) -> c_int {
     if data_ptr.is_null() || out_data.is_null() {
@@ -99,7 +94,7 @@ pub unsafe extern "C" fn parse_mzml(
     }
     let res = catch_unwind(AssertUnwindSafe(|| -> Result<(), c_int> {
         let data = unsafe { slice::from_raw_parts(data_ptr, data_len) };
-        let parsed = parse_mzml_rs(data, slim != 0).map_err(|_| ERR_PARSE)?;
+        let parsed = parse_mzml_rs(data).map_err(|_| ERR_PARSE)?;
         let bin = encode(&parsed);
         write_buf(out_data, bin.into_boxed_slice());
         Ok(())
@@ -161,7 +156,7 @@ pub unsafe extern "C" fn get_peak(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn C_get_peaks_from_eic(
+pub unsafe extern "C" fn get_peaks_from_eic(
     bin_ptr: *const u8,
     bin_len: usize,
     rts_ptr: *const f64,
@@ -267,7 +262,8 @@ pub unsafe extern "C" fn C_get_peaks_from_eic(
                 "from": p.from,
                 "to": p.to,
                 "intensity": p.intensity,
-                "integral": p.integral
+                "integral": p.integral,
+                "noise": p.noise
             }));
         }
         let s = serde_json::to_string(&arr).map_err(|_| ERR_PARSE)?;
@@ -282,7 +278,7 @@ pub unsafe extern "C" fn C_get_peaks_from_eic(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn C_get_peaks_from_chrom(
+pub unsafe extern "C" fn get_peaks_from_chrom(
     bin_ptr: *const u8,
     bin_len: usize,
     idxs_ptr: *const u32,
@@ -436,7 +432,6 @@ pub extern "C" fn find_noise_level(y_ptr: *const f32, len: usize) -> f32 {
 pub unsafe extern "C" fn bin_to_json(
     bin_ptr: *const u8,
     bin_len: usize,
-    pretty: u8,
     out_json: *mut Buf,
 ) -> c_int {
     if bin_ptr.is_null() || out_json.is_null() {
@@ -445,11 +440,7 @@ pub unsafe extern "C" fn bin_to_json(
     let res = catch_unwind(AssertUnwindSafe(|| -> Result<(), c_int> {
         let bin = unsafe { slice::from_raw_parts(bin_ptr, bin_len) };
         let mzml = decode(bin);
-        let s = if pretty != 0 {
-            serde_json::to_string_pretty(&mzml).map_err(|_| ERR_PARSE)?
-        } else {
-            serde_json::to_string(&mzml).map_err(|_| ERR_PARSE)?
-        };
+        let s = serde_json::to_string(&mzml).map_err(|_| ERR_PARSE)?;
         write_buf(out_json, s.into_bytes().into_boxed_slice());
         Ok(())
     }));
@@ -461,36 +452,7 @@ pub unsafe extern "C" fn bin_to_json(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn parse_mzml_to_json(
-    data_ptr: *const u8,
-    data_len: usize,
-    slim: u8,
-    out_json: *mut Buf,
-    out_blob: *mut Buf,
-) -> c_int {
-    if data_ptr.is_null() || out_json.is_null() || out_blob.is_null() {
-        return ERR_INVALID_ARGS;
-    }
-    let res = catch_unwind(AssertUnwindSafe(|| -> Result<(), c_int> {
-        let data = unsafe { slice::from_raw_parts(data_ptr, data_len) };
-        let parsed = parse_mzml_rs(data, slim != 0).map_err(|_| ERR_PARSE)?;
-        let meta = metadata_to_json(&parsed).map_err(|_| ERR_PARSE)?;
-        let blob = encode(&parsed);
-        // let blob = encode_h5(&parsed).map_err(|_| ERR_PARSE)?;
-
-        write_buf(out_json, meta.into_boxed_slice());
-        write_buf(out_blob, blob.into_boxed_slice());
-        Ok(())
-    }));
-    match res {
-        Ok(Ok(())) => OK,
-        Ok(Err(code)) => code,
-        Err(_) => ERR_PANIC,
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn bin_to_eic(
+pub unsafe extern "C" fn calculate_eic(
     bin_ptr: *const u8,
     bin_len: usize,
     target_ptr: *const u8,
@@ -525,47 +487,6 @@ pub unsafe extern "C" fn bin_to_eic(
         let y_bytes = f32_slice_to_u8_box(&eic.y);
         write_buf(out_x, x_bytes);
         write_buf(out_y, y_bytes);
-        Ok(())
-    }));
-    match res {
-        Ok(Ok(())) => OK,
-        Ok(Err(code)) => code,
-        Err(_) => ERR_PANIC,
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn scan_for_peaks(
-    x_ptr: *const f64,
-    y_ptr: *const f32,
-    len: usize,
-    epsilon: f64,
-    window_size: c_int,
-    out_peaks: *mut Buf,
-) -> c_int {
-    if x_ptr.is_null() || y_ptr.is_null() || out_peaks.is_null() || len < 3 {
-        return ERR_INVALID_ARGS;
-    }
-    let res = catch_unwind(AssertUnwindSafe(|| -> Result<(), c_int> {
-        let xs = unsafe { slice::from_raw_parts(x_ptr, len) };
-        let ys = unsafe { slice::from_raw_parts(y_ptr, len) };
-        let data = DataXY {
-            x: xs.to_vec(),
-            y: ys.to_vec(),
-        };
-        let ws = odd_at_least(pos_usize(window_size, 15), 3, 15);
-        let eps = if epsilon.is_finite() && epsilon > 0.0 {
-            epsilon
-        } else {
-            EPS
-        };
-        let opts = ScanPeaksOptions {
-            epsilon: eps,
-            window_size: ws,
-        };
-        let peaks = scan_for_peaks_rs(&data, Some(opts));
-        let bytes = f64_slice_to_u8_box(&peaks);
-        write_buf(out_peaks, bytes);
         Ok(())
     }));
     match res {

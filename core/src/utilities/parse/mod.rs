@@ -4,8 +4,6 @@ pub mod decode;
 pub use decode::decode;
 pub mod bin_to_json;
 pub use bin_to_json::bin_to_json;
-pub mod mzml_to_json;
-pub use mzml_to_json::mzml_to_json;
 pub mod calculate_eic;
 pub use calculate_eic::{Eic, EicOptions, calculate_eic_from_bin1, calculate_eic_from_mzml};
 pub mod helper;

@@ -37,6 +37,7 @@ struct PeakCandidate {
     intensity: f64,
     number_of_points: usize,
     ratio: f64,
+    noise: f64,
 }
 
 impl From<PeakCandidate> for Peak {
@@ -49,6 +50,7 @@ impl From<PeakCandidate> for Peak {
             intensity: c.intensity,
             ratio: c.ratio,
             np: c.number_of_points as i32,
+            noise: c.noise,
         }
     }
 }
@@ -121,6 +123,7 @@ pub fn find_peaks(data: &DataXY, options: Option<FindPeaksOptions>) -> Vec<Peak>
             intensity,
             number_of_points: ti - fi + 1,
             ratio: integral / sum_integrals,
+            noise: resolved_noise,
         });
     }
 
