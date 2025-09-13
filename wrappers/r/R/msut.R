@@ -305,6 +305,6 @@ find_peaks <- function(
     window_size=window_size, sn_ratio=sn_ratio
   ))
 
-  out_json <- .Call("C_find_peaks_json", as.numeric(x), as.numeric(y), opt, PACKAGE="msut")
+  out_json <- .Call("C_find_peaks", as.numeric(x), as.numeric(y), opt, PACKAGE="msut")
   jsonlite::fromJSON(out_json, simplifyVector=TRUE)
 }

@@ -13,12 +13,12 @@
     ],
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "composite": true
+    "incremental": false
   },
   "include": [
     "src/index-node.ts",
     "src/types/**/*.d.ts",
-    "src/utilities/**/*.ts",
+    "src/utilities/**/*.ts"
   ],
   "exclude": [
     "src/index-wasm.ts",

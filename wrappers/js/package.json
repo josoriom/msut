@@ -5,16 +5,16 @@
   "license": "MIT",
   "type": "module",
   "main": "./lib/index-node.js",
-  "module": "./lib/index-node.js",
   "types": "./lib/index-node.d.ts",
   "exports": {
     ".": {
       "types": "./lib/index-node.d.ts",
+      "node": {
+        "import": "./lib/index-node.js",
+        "require": "./lib/index-node.js"
+      },
       "browser": "./dist/index-wasm.js",
-      "node": "./lib/index-node.js",
-      "import": "./lib/index-node.js",
-      "require": "./lib/index-node.js",
-      "default": "./dist/index-wasm.js"
+      "default": "./lib/index-node.js"
     }
   },
   "files": [
@@ -30,7 +30,7 @@
   },
   "scripts": {
     "install": "node-gyp rebuild",
-    "build": "npm run tsc && npx webpack && cp ../../artifacts/wasm/msut.wasm dist/msut.wasm",
+    "build": "npm run tsc",
     "check-types": "tsc --noEmit",
     "clean": "rimraf dist lib types",
     "eslint": "eslint src --cache",
@@ -41,7 +41,7 @@
     "test": "npm run check-types && npm run eslint && npm run prettier && npm run test-only",
     "test-coverage": "npm run test-only -- --coverage",
     "test-only": "jest",
-    "tsc": "rimraf dist lib lib-esm types && npm run tsc-cjs && npm run tsc-esm && npm run copy-wasm",
+    "tsc": "rimraf dist lib lib-esm types && npm run tsc-cjs",
     "tsc-cjs": "tsc --project tsconfig.cjs.json && node -e \"const fs=require('fs');fs.mkdirSync('lib',{recursive:true});fs.writeFileSync('lib/package.json','{\\n  \\\"type\\\": \\\"commonjs\\\"\\n}\\n')\"",
     "tsc-esm": "tsc --project tsconfig.esm.json",
     "copy-wasm": "cp ../../artifacts/wasm/msut.wasm lib/msut.wasm && cp ../../artifacts/wasm/msut.wasm lib-esm/msut.wasm"

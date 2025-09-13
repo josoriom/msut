@@ -76,20 +76,13 @@ typedef struct
   fn_free_ free_;
 } msabi_t;
 
-static msabi_t ABI = (msabi_t){0};
+static msabi_t ABI{}; // zero-initialize cleanly in C++
 static DLIB LIB_HANDLE = NULL;
 
 static int resolve_required(void **fn, const char *name)
 {
   *fn = DLSYM(LIB_HANDLE, name);
   return *fn ? 0 : -1;
-}
-
-static void resolve_optional2(void **fn, const char *s1, const char *s2)
-{
-  *fn = DLSYM(LIB_HANDLE, s1);
-  if (!*fn && s2)
-    *fn = DLSYM(LIB_HANDLE, s2);
 }
 
 static int abi_load(const char *path, const char **err)
@@ -112,18 +105,23 @@ static int abi_load(const char *path, const char **err)
     return -1;
   }
 
+  // All strict (required)
   if (resolve_required((void **)&ABI.parse_mzml, "parse_mzml"))
     goto fail;
   if (resolve_required((void **)&ABI.bin_to_json, "bin_to_json"))
     goto fail;
   if (resolve_required((void **)&ABI.get_peak, "get_peak"))
     goto fail;
-
-  resolve_optional2((void **)&ABI.calculate_eic, "calculate_eic");
-  resolve_optional2((void **)&ABI.find_noise_level, "find_noise_level", NULL);
-  resolve_optional2((void **)&ABI.C_get_peaks_from_eic, "C_get_peaks_from_eic", "get_peaks_from_eic");
-  resolve_optional2((void **)&ABI.C_get_peaks_from_chrom, "C_get_peaks_from_chrom", "get_peaks_from_chrom");
-  resolve_optional2((void **)&ABI.find_peaks, "find_peaks", "C_find_peaks");
+  if (resolve_required((void **)&ABI.calculate_eic, "calculate_eic"))
+    goto fail;
+  if (resolve_required((void **)&ABI.find_noise_level, "find_noise_level"))
+    goto fail;
+  if (resolve_required((void **)&ABI.C_get_peaks_from_eic, "get_peaks_from_eic"))
+    goto fail;
+  if (resolve_required((void **)&ABI.C_get_peaks_from_chrom, "get_peaks_from_chrom"))
+    goto fail;
+  if (resolve_required((void **)&ABI.find_peaks, "find_peaks"))
+    goto fail;
 
   ABI.free_ = (fn_free_)DLSYM(LIB_HANDLE, "free_");
   if (!ABI.free_)
@@ -345,11 +343,7 @@ static Napi::Value CalculateEic(const Napi::CallbackInfo &info)
 static Napi::Value FindNoiseLevel(const Napi::CallbackInfo &info)
 {
   Napi::Env env = info.Env();
-  if (!ABI.find_noise_level)
-  {
-    Napi::Error::New(env, "find_noise_level not exported by native library").ThrowAsJavaScriptException();
-    return env.Undefined();
-  }
+  ThrowIfMissing(env, (void *)ABI.find_noise_level, "find_noise_level");
   Napi::Float32Array y_arr = info[0].As<Napi::Float32Array>();
   float *y_ptr = (float *)((uint8_t *)y_arr.ArrayBuffer().Data() + y_arr.ByteOffset());
   float value = ABI.find_noise_level(y_ptr, y_arr.ElementLength());
@@ -359,11 +353,7 @@ static Napi::Value FindNoiseLevel(const Napi::CallbackInfo &info)
 static Napi::Value GetPeaksFromEic(const Napi::CallbackInfo &info)
 {
   Napi::Env env = info.Env();
-  if (!ABI.C_get_peaks_from_eic)
-  {
-    Napi::Error::New(env, "get_peaks_from_eic not exported by native library").ThrowAsJavaScriptException();
-    return env.Undefined();
-  }
+  ThrowIfMissing(env, (void *)ABI.C_get_peaks_from_eic, "get_peaks_from_eic");
   ThrowIfMissing(env, (void *)ABI.free_, "free_");
 
   Napi::Buffer<uint8_t> bin = info[0].As<Napi::Buffer<uint8_t>>();
@@ -470,11 +460,7 @@ static Napi::Value GetPeaksFromEic(const Napi::CallbackInfo &info)
 static Napi::Value GetPeaksFromChrom(const Napi::CallbackInfo &info)
 {
   Napi::Env env = info.Env();
-  if (!ABI.C_get_peaks_from_chrom)
-  {
-    Napi::Error::New(env, "get_peaks_from_chrom not exported by native library").ThrowAsJavaScriptException();
-    return env.Undefined();
-  }
+  ThrowIfMissing(env, (void *)ABI.C_get_peaks_from_chrom, "get_peaks_from_chrom");
   ThrowIfMissing(env, (void *)ABI.free_, "free_");
 
   Napi::Buffer<uint8_t> bin = info[0].As<Napi::Buffer<uint8_t>>();
@@ -522,11 +508,7 @@ static Napi::Value GetPeaksFromChrom(const Napi::CallbackInfo &info)
 static Napi::Value FindPeaks(const Napi::CallbackInfo &info)
 {
   Napi::Env env = info.Env();
-  if (!ABI.find_peaks)
-  {
-    Napi::Error::New(env, "find_peaks not exported by native library").ThrowAsJavaScriptException();
-    return env.Undefined();
-  }
+  ThrowIfMissing(env, (void *)ABI.find_peaks, "find_peaks");
   ThrowIfMissing(env, (void *)ABI.free_, "free_");
 
   Napi::Float64Array x_arr = info[0].As<Napi::Float64Array>();

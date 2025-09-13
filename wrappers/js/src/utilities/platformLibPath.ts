@@ -1,5 +1,11 @@
+/// <reference types="node" />
 import * as path from "path";
-import { firstExisting } from "./firstExisting";
+import * as fs from "fs";
+
+function firstExisting(...candidates: string[]) {
+  for (const p of candidates) if (fs.existsSync(p)) return p;
+  return candidates[0];
+}
 
 export function platformLibPath(proc: NodeJS.Process): string {
   const base = path.join(__dirname, "..", "native");

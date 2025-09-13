@@ -476,7 +476,7 @@ SEXP C_calculate_eic(SEXP bin, SEXP targets, SEXP from, SEXP to, SEXP ppm_tol, S
   return out;
 }
 
-SEXP C_find_peaks_json(SEXP x, SEXP y, SEXP options)
+SEXP C_find_peaks(SEXP x, SEXP y, SEXP options)
 {
   if (TYPEOF(x) != REALSXP || TYPEOF(y) != REALSXP)
     error("numeric");

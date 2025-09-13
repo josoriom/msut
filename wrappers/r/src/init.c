@@ -9,7 +9,7 @@ SEXP C_get_peak(SEXP x, SEXP y, SEXP rt, SEXP range, SEXP options);
 SEXP C_get_peaks_from_eic(SEXP bin, SEXP rts, SEXP mzs, SEXP ranges, SEXP ids, SEXP from_left, SEXP to_right, SEXP options, SEXP cores);
 SEXP C_get_peaks_from_chrom(SEXP bin, SEXP idxs, SEXP rts, SEXP ranges, SEXP options, SEXP cores);
 SEXP C_calculate_eic(SEXP bin, SEXP targets, SEXP from, SEXP to, SEXP ppm_tol, SEXP mz_tol);
-SEXP C_find_peaks_json(SEXP x, SEXP y, SEXP options);
+SEXP C_find_peaks(SEXP x, SEXP y, SEXP options);
 
 static const R_CallMethodDef CallEntries[] = {
     {"C_bind_rust", (DL_FUNC)&C_bind_rust, 1},
@@ -19,7 +19,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"C_get_peaks_from_eic", (DL_FUNC)&C_get_peaks_from_eic, 9},
     {"C_get_peaks_from_chrom", (DL_FUNC)&C_get_peaks_from_chrom, 6},
     {"C_calculate_eic", (DL_FUNC)&C_calculate_eic, 6},
-    {"C_find_peaks_json", (DL_FUNC)&C_find_peaks_json, 3},
+    {"C_find_peaks", (DL_FUNC)&C_find_peaks, 3},
     {NULL, NULL, 0}};
 
 void R_init_msut(DllInfo *dll)
