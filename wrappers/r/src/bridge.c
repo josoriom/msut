@@ -40,11 +40,10 @@ typedef struct
   int32_t sn_ratio;
 } CPeakPOptions;
 
-typedef int32_t (*fn_parse_mzml)(const unsigned char *, size_t, unsigned char, Buf *);
-typedef int32_t (*fn_parse_mzml_to_json)(const unsigned char *, size_t, unsigned char, Buf *, Buf *);
-typedef int32_t (*fn_bin_to_json)(const unsigned char *, size_t, unsigned char, Buf *);
+typedef int32_t (*fn_parse_mzml)(const unsigned char *, size_t, Buf *);
+typedef int32_t (*fn_bin_to_json)(const unsigned char *, size_t, Buf *);
 typedef int32_t (*fn_get_peak)(const double *, const float *, size_t, double, double, const CPeakPOptions *, Buf *);
-typedef int32_t (*fn_bin_to_eic)(const unsigned char *, size_t, const unsigned char *, size_t, double, double, double, double, Buf *, Buf *);
+typedef int32_t (*fn_calculate_eic)(const unsigned char *, size_t, const unsigned char *, size_t, double, double, double, double, Buf *, Buf *);
 typedef float (*fn_find_noise_level)(const float *, size_t);
 typedef int32_t (*fn_get_peaks_from_eic)(const unsigned char *, size_t, const double *, const double *, const double *, const uint32_t *, const uint32_t *, const unsigned char *, size_t, size_t, double, double, const CPeakPOptions *, size_t, Buf *);
 typedef int32_t (*fn_get_peaks_from_chrom)(const unsigned char *, size_t, const uint32_t *, const double *, const double *, size_t, const CPeakPOptions *, size_t, Buf *);
@@ -54,10 +53,9 @@ typedef void (*fn_free_)(unsigned char *, size_t);
 typedef struct
 {
   fn_parse_mzml parse_mzml;
-  fn_parse_mzml_to_json parse_mzml_to_json;
   fn_bin_to_json bin_to_json;
   fn_get_peak get_peak;
-  fn_bin_to_eic bin_to_eic;
+  fn_calculate_eic calculate_eic;
   fn_find_noise_level find_noise_level;
   fn_get_peaks_from_eic C_get_peaks_from_eic;
   fn_get_peaks_from_chrom C_get_peaks_from_chrom;
@@ -66,16 +64,13 @@ typedef struct
 } abi_type;
 
 static DLIB abi_handle = NULL;
-abi_type ABI = {0};
+abi_type ABI = (abi_type){0};
 
 static int resolve_required(void **fn, const char *name)
 {
   *fn = DLSYM(abi_handle, name);
-  if (*fn)
-    return 0;
-  return -1;
+  return *fn ? 0 : -1;
 }
-
 static void resolve_optional2(void **fn, const char *s1, const char *s2)
 {
   *fn = DLSYM(abi_handle, s1);
@@ -106,13 +101,11 @@ int abi_load(const char *path, const char **err)
 
   if (resolve_required((void **)&ABI.parse_mzml, "parse_mzml"))
     goto fail;
-  if (resolve_required((void **)&ABI.parse_mzml_to_json, "parse_mzml_to_json"))
-    goto fail;
   if (resolve_required((void **)&ABI.bin_to_json, "bin_to_json"))
     goto fail;
   if (resolve_required((void **)&ABI.get_peak, "get_peak"))
     goto fail;
-  if (resolve_required((void **)&ABI.bin_to_eic, "bin_to_eic"))
+  if (resolve_required((void **)&ABI.calculate_eic, "calculate_eic"))
     goto fail;
 
   resolve_optional2((void **)&ABI.find_noise_level, "find_noise_level", NULL);
@@ -123,7 +116,6 @@ int abi_load(const char *path, const char **err)
   ABI.free_ = (fn_free_)DLSYM(abi_handle, "free_");
   if (!ABI.free_)
     goto fail;
-
   return 0;
 
 fail:
@@ -176,8 +168,7 @@ static SEXP mk_string_len(const unsigned char *ptr, size_t len)
       error("msut: symbol %s is not bound; did .onLoad() run?", (name)); \
   } while (0)
 
-static SEXP
-list_get(SEXP lst, const char *name)
+static SEXP list_get(SEXP lst, const char *name)
 {
   if (TYPEOF(lst) != VECSXP)
     return R_NilValue;
@@ -200,7 +191,6 @@ static int fill_options(SEXP opts, CPeakPOptions *out)
 {
   if (opts == R_NilValue || TYPEOF(opts) != VECSXP || XLENGTH(opts) == 0)
     return 0;
-
   out->integral_threshold = NAN;
   out->intensity_threshold = NAN;
   out->width_threshold = 0;
@@ -211,39 +201,30 @@ static int fill_options(SEXP opts, CPeakPOptions *out)
   out->sn_ratio = 0;
 
   SEXP v = R_NilValue;
-
   v = list_get(opts, "integral_threshold");
   if (v != R_NilValue)
     out->integral_threshold = asReal(v);
-
   v = list_get(opts, "intensity_threshold");
   if (v != R_NilValue)
     out->intensity_threshold = asReal(v);
-
   v = list_get(opts, "width_threshold");
   if (v != R_NilValue)
     out->width_threshold = (int32_t)asInteger(v);
-
   v = list_get(opts, "noise");
   if (v != R_NilValue)
     out->noise = asReal(v);
-
   v = list_get(opts, "auto_noise");
   if (v != R_NilValue)
     out->auto_noise = (int32_t)asLogical(v);
-
   v = list_get(opts, "allow_overlap");
   if (v != R_NilValue)
     out->allow_overlap = (int32_t)asLogical(v);
-
   v = list_get(opts, "window_size");
   if (v != R_NilValue)
     out->window_size = (int32_t)asInteger(v);
-
   v = list_get(opts, "sn_ratio");
   if (v != R_NilValue)
     out->sn_ratio = (int32_t)asInteger(v);
-
   return 1;
 }
 
@@ -258,17 +239,15 @@ SEXP C_bind_rust(SEXP path_)
   return R_NilValue;
 }
 
-SEXP C_parse_mzml(SEXP data, SEXP slim)
+SEXP C_parse_mzml(SEXP data)
 {
   if (TYPEOF(data) != RAWSXP)
     error("data");
   REQUIRE_BOUND(ABI.parse_mzml, "parse_mzml");
   REQUIRE_BOUND(ABI.free_, "free_");
-
   Buf out = (Buf){0};
-  int code = ABI.parse_mzml((const unsigned char *)RAW(data), (size_t)XLENGTH(data), (unsigned char)asLogical(slim), &out);
+  int code = ABI.parse_mzml((const unsigned char *)RAW(data), (size_t)XLENGTH(data), &out);
   die_code("parse_mzml", code);
-
   SEXP res = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)out.len));
   memcpy(RAW(res), out.ptr, out.len);
   ABI.free_(out.ptr, out.len);
@@ -276,51 +255,18 @@ SEXP C_parse_mzml(SEXP data, SEXP slim)
   return res;
 }
 
-SEXP C_bin_to_json(SEXP bin, SEXP pretty)
+SEXP C_bin_to_json(SEXP bin)
 {
   if (TYPEOF(bin) != RAWSXP)
     error("bin");
   REQUIRE_BOUND(ABI.bin_to_json, "bin_to_json");
   REQUIRE_BOUND(ABI.free_, "free_");
-
   Buf out = (Buf){0};
-  int code = ABI.bin_to_json((const unsigned char *)RAW(bin), (size_t)XLENGTH(bin), (unsigned char)asLogical(pretty), &out);
+  int code = ABI.bin_to_json((const unsigned char *)RAW(bin), (size_t)XLENGTH(bin), &out);
   die_code("bin_to_json", code);
-
   SEXP res = mk_string_len(out.ptr, out.len);
   ABI.free_(out.ptr, out.len);
   return res;
-}
-
-SEXP C_parse_mzml_to_json(SEXP data, SEXP slim)
-{
-  if (TYPEOF(data) != RAWSXP)
-    error("data");
-  REQUIRE_BOUND(ABI.parse_mzml_to_json, "parse_mzml_to_json");
-  REQUIRE_BOUND(ABI.free_, "free_");
-
-  Buf j = (Buf){0};
-  Buf b = (Buf){0};
-  int code = ABI.parse_mzml_to_json((const unsigned char *)RAW(data), (size_t)XLENGTH(data), (unsigned char)asLogical(slim), &j, &b);
-  die_code("parse_mzml_to_json", code);
-
-  SEXP json = mk_string_len(j.ptr, j.len);
-  SEXP blob = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t)b.len));
-  memcpy(RAW(blob), b.ptr, b.len);
-  ABI.free_(j.ptr, j.len);
-  ABI.free_(b.ptr, b.len);
-
-  SEXP out = PROTECT(Rf_allocVector(VECSXP, 2));
-  SET_VECTOR_ELT(out, 0, json);
-  SET_VECTOR_ELT(out, 1, blob);
-
-  SEXP nms = PROTECT(Rf_allocVector(STRSXP, 2));
-  SET_STRING_ELT(nms, 0, Rf_mkChar("json"));
-  SET_STRING_ELT(nms, 1, Rf_mkChar("blob"));
-  Rf_setAttrib(out, R_NamesSymbol, nms);
-
-  UNPROTECT(3);
-  return out;
 }
 
 SEXP C_get_peak(SEXP x, SEXP y, SEXP rt, SEXP range, SEXP options)
@@ -345,7 +291,6 @@ SEXP C_get_peak(SEXP x, SEXP y, SEXP rt, SEXP range, SEXP options)
   Buf out = (Buf){0};
   int code = ABI.get_peak(REAL(x), fy, (size_t)n, asReal(rt), asReal(range), opt_ptr, &out);
   die_code("get_peak", code);
-
   SEXP res = mk_string_len(out.ptr, out.len);
   ABI.free_(out.ptr, out.len);
   return res;
@@ -353,8 +298,7 @@ SEXP C_get_peak(SEXP x, SEXP y, SEXP rt, SEXP range, SEXP options)
 
 SEXP C_get_peaks_from_eic(SEXP bin, SEXP rts, SEXP mzs, SEXP ranges, SEXP ids, SEXP from_left, SEXP to_right, SEXP options, SEXP cores)
 {
-  if (TYPEOF(bin) != RAWSXP || TYPEOF(rts) != REALSXP ||
-      TYPEOF(mzs) != REALSXP || TYPEOF(ranges) != REALSXP)
+  if (TYPEOF(bin) != RAWSXP || TYPEOF(rts) != REALSXP || TYPEOF(mzs) != REALSXP || TYPEOF(ranges) != REALSXP)
     error("bad args");
   if (!(XLENGTH(rts) == XLENGTH(mzs) && XLENGTH(mzs) == XLENGTH(ranges)))
     error("length mismatch");
@@ -362,9 +306,7 @@ SEXP C_get_peaks_from_eic(SEXP bin, SEXP rts, SEXP mzs, SEXP ranges, SEXP ids, S
   REQUIRE_BOUND(ABI.free_, "free_");
 
   R_xlen_t n = XLENGTH(rts);
-
-  uint32_t *offs = NULL;
-  uint32_t *lens = NULL;
+  uint32_t *offs = NULL, *lens = NULL;
   unsigned char *ids_buf = NULL;
   size_t ids_len = 0;
 
@@ -372,10 +314,8 @@ SEXP C_get_peaks_from_eic(SEXP bin, SEXP rts, SEXP mzs, SEXP ranges, SEXP ids, S
   {
     if (TYPEOF(ids) != STRSXP)
       error("ids must be character");
-
     offs = (uint32_t *)R_alloc((size_t)n, sizeof(uint32_t));
     lens = (uint32_t *)R_alloc((size_t)n, sizeof(uint32_t));
-
     size_t total = 0;
     for (R_xlen_t i = 0; i < n; i++)
     {
@@ -383,10 +323,8 @@ SEXP C_get_peaks_from_eic(SEXP bin, SEXP rts, SEXP mzs, SEXP ranges, SEXP ids, S
       if (s != R_NilValue)
         total += (size_t)LENGTH(s);
     }
-
     ids_buf = (unsigned char *)R_alloc(total, 1);
     ids_len = total;
-
     size_t cur = 0;
     for (R_xlen_t i = 0; i < n; i++)
     {
@@ -446,7 +384,6 @@ SEXP C_get_peaks_from_chrom(SEXP bin, SEXP idxs, SEXP rts, SEXP ranges, SEXP opt
   REQUIRE_BOUND(ABI.free_, "free_");
 
   uint32_t *uidx = (uint32_t *)R_alloc((size_t)n, sizeof(uint32_t));
-
   if (TYPEOF(idxs) == INTSXP)
   {
     int *ix = INTEGER(idxs);
@@ -466,9 +403,7 @@ SEXP C_get_peaks_from_chrom(SEXP bin, SEXP idxs, SEXP rts, SEXP ranges, SEXP opt
     }
   }
   else
-  {
     error("idx must be integer/numeric");
-  }
 
   size_t ncores = (cores == R_NilValue) ? 1 : (size_t)asInteger(cores);
   if (ncores < 1)
@@ -491,28 +426,26 @@ SEXP C_get_peaks_from_chrom(SEXP bin, SEXP idxs, SEXP rts, SEXP ranges, SEXP opt
   return res;
 }
 
-SEXP C_bin_to_eic(SEXP bin, SEXP targets, SEXP from, SEXP to, SEXP ppm_tol, SEXP mz_tol)
+SEXP C_calculate_eic(SEXP bin, SEXP targets, SEXP from, SEXP to, SEXP ppm_tol, SEXP mz_tol)
 {
   if (TYPEOF(bin) != RAWSXP)
     error("bin");
   if (TYPEOF(targets) != STRSXP || LENGTH(targets) != 1)
     error("targets");
-  REQUIRE_BOUND(ABI.bin_to_eic, "bin_to_eic");
+  REQUIRE_BOUND(ABI.calculate_eic, "calculate_eic");
   REQUIRE_BOUND(ABI.free_, "free_");
 
   const char *t = CHAR(STRING_ELT(targets, 0));
   size_t tlen = strlen(t);
 
-  Buf bx = (Buf){0};
-  Buf by = (Buf){0};
-
-  int code = ABI.bin_to_eic(
+  Buf bx = (Buf){0}, by = (Buf){0};
+  int code = ABI.calculate_eic(
       (const unsigned char *)RAW(bin), (size_t)XLENGTH(bin),
       (const unsigned char *)t, tlen,
       asReal(from), asReal(to),
       asReal(ppm_tol), asReal(mz_tol),
       &bx, &by);
-  die_code("bin_to_eic", code);
+  die_code("calculate_eic", code);
 
   size_t nx = bx.len / 8;
   SEXP Rx = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)nx));
@@ -534,7 +467,6 @@ SEXP C_bin_to_eic(SEXP bin, SEXP targets, SEXP from, SEXP to, SEXP ppm_tol, SEXP
   SEXP out = PROTECT(Rf_allocVector(VECSXP, 2));
   SET_VECTOR_ELT(out, 0, Rx);
   SET_VECTOR_ELT(out, 1, Ry);
-
   SEXP nms = PROTECT(Rf_allocVector(STRSXP, 2));
   SET_STRING_ELT(nms, 0, Rf_mkChar("x"));
   SET_STRING_ELT(nms, 1, Rf_mkChar("y"));
