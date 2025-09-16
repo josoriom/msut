@@ -86,7 +86,6 @@ int abi_load(const char *path, const char **err)
     abi_handle = NULL;
   }
   memset(&ABI, 0, sizeof(ABI));
-
   abi_handle = DLOPEN(path);
 #if !defined(_WIN32)
   if (!abi_handle)
@@ -98,7 +97,6 @@ int abi_load(const char *path, const char **err)
       *err = last_err;
     return -1;
   }
-
   if (resolve_required((void **)&ABI.parse_mzml, "parse_mzml"))
     goto fail;
   if (resolve_required((void **)&ABI.bin_to_json, "bin_to_json"))
@@ -107,17 +105,14 @@ int abi_load(const char *path, const char **err)
     goto fail;
   if (resolve_required((void **)&ABI.calculate_eic, "calculate_eic"))
     goto fail;
-
   resolve_optional2((void **)&ABI.find_noise_level, "find_noise_level", NULL);
   resolve_optional2((void **)&ABI.C_get_peaks_from_eic, "C_get_peaks_from_eic", "get_peaks_from_eic");
   resolve_optional2((void **)&ABI.C_get_peaks_from_chrom, "C_get_peaks_from_chrom", "get_peaks_from_chrom");
   resolve_optional2((void **)&ABI.find_peaks, "find_peaks", "C_find_peaks");
-
   ABI.free_ = (fn_free_)DLSYM(abi_handle, "free_");
   if (!ABI.free_)
     goto fail;
   return 0;
-
 fail:
   if (abi_handle)
   {
@@ -199,7 +194,6 @@ static int fill_options(SEXP opts, CPeakPOptions *out)
   out->allow_overlap = 0;
   out->window_size = 0;
   out->sn_ratio = 0;
-
   SEXP v = R_NilValue;
   v = list_get(opts, "integral_threshold");
   if (v != R_NilValue)
@@ -226,6 +220,30 @@ static int fill_options(SEXP opts, CPeakPOptions *out)
   if (v != R_NilValue)
     out->sn_ratio = (int32_t)asInteger(v);
   return 1;
+}
+
+static int as_opts_ptr(SEXP options, CPeakPOptions *copy, const CPeakPOptions **out_ptr)
+{
+  *out_ptr = NULL;
+  if (options == R_NilValue)
+    return 0;
+  if (TYPEOF(options) == RAWSXP)
+  {
+    if ((size_t)XLENGTH(options) != 48)
+      error("msut: options raw blob must be length 48");
+    memcpy((void *)copy, (const void *)RAW(options), 48);
+    *out_ptr = copy;
+    return 1;
+  }
+  if (TYPEOF(options) == VECSXP && XLENGTH(options) > 0)
+  {
+    if (fill_options(options, copy))
+    {
+      *out_ptr = copy;
+      return 1;
+    }
+  }
+  return 0;
 }
 
 SEXP C_bind_rust(SEXP path_)
@@ -277,17 +295,13 @@ SEXP C_get_peak(SEXP x, SEXP y, SEXP rt, SEXP range, SEXP options)
     error("length");
   REQUIRE_BOUND(ABI.get_peak, "get_peak");
   REQUIRE_BOUND(ABI.free_, "free_");
-
   R_xlen_t n = XLENGTH(y);
   float *fy = (float *)R_alloc((size_t)n, sizeof(float));
   for (R_xlen_t i = 0; i < n; i++)
     fy[i] = (float)REAL(y)[i];
-
   CPeakPOptions opts;
   const CPeakPOptions *opt_ptr = NULL;
-  if (fill_options(options, &opts))
-    opt_ptr = &opts;
-
+  (void)as_opts_ptr(options, &opts, &opt_ptr);
   Buf out = (Buf){0};
   int code = ABI.get_peak(REAL(x), fy, (size_t)n, asReal(rt), asReal(range), opt_ptr, &out);
   die_code("get_peak", code);
@@ -304,12 +318,10 @@ SEXP C_get_peaks_from_eic(SEXP bin, SEXP rts, SEXP mzs, SEXP ranges, SEXP ids, S
     error("length mismatch");
   REQUIRE_BOUND(ABI.C_get_peaks_from_eic, "get_peaks_from_eic");
   REQUIRE_BOUND(ABI.free_, "free_");
-
   R_xlen_t n = XLENGTH(rts);
   uint32_t *offs = NULL, *lens = NULL;
   unsigned char *ids_buf = NULL;
   size_t ids_len = 0;
-
   if (ids != R_NilValue)
   {
     if (TYPEOF(ids) != STRSXP)
@@ -344,16 +356,12 @@ SEXP C_get_peaks_from_eic(SEXP bin, SEXP rts, SEXP mzs, SEXP ranges, SEXP ids, S
       }
     }
   }
-
   size_t ncores = (cores == R_NilValue) ? 1 : (size_t)asInteger(cores);
   if (ncores < 1)
     ncores = 1;
-
   CPeakPOptions opts;
   const CPeakPOptions *opt_ptr = NULL;
-  if (fill_options(options, &opts))
-    opt_ptr = &opts;
-
+  (void)as_opts_ptr(options, &opts, &opt_ptr);
   Buf out = (Buf){0};
   int code = ABI.C_get_peaks_from_eic(
       (const unsigned char *)RAW(bin), (size_t)XLENGTH(bin),
@@ -363,7 +371,6 @@ SEXP C_get_peaks_from_eic(SEXP bin, SEXP rts, SEXP mzs, SEXP ranges, SEXP ids, S
       (size_t)n, asReal(from_left), asReal(to_right),
       opt_ptr, ncores, &out);
   die_code("get_peaks_from_eic", code);
-
   SEXP res = mk_string_len(out.ptr, out.len);
   ABI.free_(out.ptr, out.len);
   return res;
@@ -382,7 +389,6 @@ SEXP C_get_peaks_from_chrom(SEXP bin, SEXP idxs, SEXP rts, SEXP ranges, SEXP opt
     error("length");
   REQUIRE_BOUND(ABI.C_get_peaks_from_chrom, "get_peaks_from_chrom");
   REQUIRE_BOUND(ABI.free_, "free_");
-
   uint32_t *uidx = (uint32_t *)R_alloc((size_t)n, sizeof(uint32_t));
   if (TYPEOF(idxs) == INTSXP)
   {
@@ -404,23 +410,18 @@ SEXP C_get_peaks_from_chrom(SEXP bin, SEXP idxs, SEXP rts, SEXP ranges, SEXP opt
   }
   else
     error("idx must be integer/numeric");
-
   size_t ncores = (cores == R_NilValue) ? 1 : (size_t)asInteger(cores);
   if (ncores < 1)
     ncores = 1;
-
   CPeakPOptions opts;
   const CPeakPOptions *opt_ptr = NULL;
-  if (fill_options(options, &opts))
-    opt_ptr = &opts;
-
+  (void)as_opts_ptr(options, &opts, &opt_ptr);
   Buf out = (Buf){0};
   int code = ABI.C_get_peaks_from_chrom(
       (const unsigned char *)RAW(bin), (size_t)XLENGTH(bin),
       uidx, REAL(rts), REAL(ranges), (size_t)n,
       opt_ptr, ncores, &out);
   die_code("get_peaks_from_chrom", code);
-
   SEXP res = mk_string_len(out.ptr, out.len);
   ABI.free_(out.ptr, out.len);
   return res;
@@ -434,10 +435,8 @@ SEXP C_calculate_eic(SEXP bin, SEXP targets, SEXP from, SEXP to, SEXP ppm_tol, S
     error("targets");
   REQUIRE_BOUND(ABI.calculate_eic, "calculate_eic");
   REQUIRE_BOUND(ABI.free_, "free_");
-
   const char *t = CHAR(STRING_ELT(targets, 0));
   size_t tlen = strlen(t);
-
   Buf bx = (Buf){0}, by = (Buf){0};
   int code = ABI.calculate_eic(
       (const unsigned char *)RAW(bin), (size_t)XLENGTH(bin),
@@ -446,11 +445,9 @@ SEXP C_calculate_eic(SEXP bin, SEXP targets, SEXP from, SEXP to, SEXP ppm_tol, S
       asReal(ppm_tol), asReal(mz_tol),
       &bx, &by);
   die_code("calculate_eic", code);
-
   size_t nx = bx.len / 8;
   SEXP Rx = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)nx));
   memcpy(REAL(Rx), bx.ptr, bx.len);
-
   size_t ny = by.len / 4;
   SEXP Ry = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)ny));
   for (size_t i = 0; i < ny; i++)
@@ -460,10 +457,8 @@ SEXP C_calculate_eic(SEXP bin, SEXP targets, SEXP from, SEXP to, SEXP ppm_tol, S
     REAL(Ry)
     [i] = (double)fv;
   }
-
   ABI.free_(bx.ptr, bx.len);
   ABI.free_(by.ptr, by.len);
-
   SEXP out = PROTECT(Rf_allocVector(VECSXP, 2));
   SET_VECTOR_ELT(out, 0, Rx);
   SET_VECTOR_ELT(out, 1, Ry);
@@ -471,7 +466,6 @@ SEXP C_calculate_eic(SEXP bin, SEXP targets, SEXP from, SEXP to, SEXP ppm_tol, S
   SET_STRING_ELT(nms, 0, Rf_mkChar("x"));
   SET_STRING_ELT(nms, 1, Rf_mkChar("y"));
   Rf_setAttrib(out, R_NamesSymbol, nms);
-
   UNPROTECT(4);
   return out;
 }
@@ -484,21 +478,16 @@ SEXP C_find_peaks(SEXP x, SEXP y, SEXP options)
     error("length");
   REQUIRE_BOUND(ABI.find_peaks, "find_peaks");
   REQUIRE_BOUND(ABI.free_, "free_");
-
   R_xlen_t n = XLENGTH(y);
   float *fy = (float *)R_alloc((size_t)n, sizeof(float));
   for (R_xlen_t i = 0; i < n; i++)
     fy[i] = (float)REAL(y)[i];
-
   CPeakPOptions opts;
   const CPeakPOptions *opt_ptr = NULL;
-  if (fill_options(options, &opts))
-    opt_ptr = &opts;
-
+  (void)as_opts_ptr(options, &opts, &opt_ptr);
   Buf out = (Buf){0};
   int code = ABI.find_peaks(REAL(x), fy, (size_t)n, opt_ptr, &out);
   die_code("find_peaks", code);
-
   SEXP res = mk_string_len(out.ptr, out.len);
   ABI.free_(out.ptr, out.len);
   return res;

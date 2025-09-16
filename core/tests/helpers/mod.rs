@@ -1,13 +1,24 @@
 // tests/helpers.rs
-use msut::utilities::structs::DataXY;
+use msut::utilities::structs::{DataXY, Peak};
 
-/// Get one Gaussian value at x (bell curve). `base` lifts the whole curve.
+#[allow(dead_code)]
+pub fn dump_peaks(peaks: &[Peak]) {
+    println!("peaks.len() = {}", peaks.len());
+    for (i, p) in peaks.iter().enumerate() {
+        println!(
+            "#{:03} from={:.6} to={:.6} rt={:.6} integral={:.3} intensity={:.3} ratio={:.3} np={} noise={:.3}",
+            i, p.from, p.to, p.rt, p.integral, p.intensity, p.ratio, p.np, p.noise
+        );
+    }
+}
+
 #[inline]
+#[allow(dead_code)]
 pub fn gaussian_value(x: f64, mu: f64, sigma: f64, amp: f64, base: f64) -> f64 {
     base + amp * (-0.5 * ((x - mu) / sigma).powi(2)).exp()
 }
 
-/// Build a signal made of one or more Gaussians, plus a constant `base` and optional small fake `noise`. Returns f32 values for plotting/algorithms.
+#[allow(dead_code)]
 pub fn gaussian_mixture_f32(
     xs: &[f64],
     peaks: &[(f64, f64, f64)],
@@ -29,7 +40,6 @@ pub fn gaussian_mixture_f32(
         .collect()
 }
 
-/// Make an even grid from start to end with n points (inclusive).
 pub fn make_grid(start: f64, end: f64, n: usize) -> Vec<f64> {
     if n <= 1 {
         return vec![start];
@@ -39,13 +49,11 @@ pub fn make_grid(start: f64, end: f64, n: usize) -> Vec<f64> {
         .collect()
 }
 
-/// Same as `make_grid`, named like NumPy for familiarity.
 #[allow(dead_code)]
 pub fn linspace(from: f64, to: f64, n: usize) -> Vec<f64> {
     make_grid(from, to, n)
 }
 
-/// Small deterministic wiggle in [-0.5, 0.5] you can use as repeatable “noise”.
 #[allow(dead_code)]
 pub fn jitter(i: u32) -> f64 {
     let mut x = i.wrapping_mul(1664525).wrapping_add(1013904223);
@@ -55,19 +63,16 @@ pub fn jitter(i: u32) -> f64 {
     (x as f64 / (u32::MAX as f64)) - 0.5
 }
 
-/// Check two numbers are close within a simple absolute tolerance.
 #[allow(dead_code)]
 pub fn approx_eq(a: f64, b: f64, tol: f64) -> bool {
     (a - b).abs() <= tol
 }
 
-/// Build a `DataXY` from x and y vectors.
 #[allow(dead_code)]
 pub fn data_xy(xs: Vec<f64>, ys: Vec<f32>) -> DataXY {
     DataXY { x: xs, y: ys }
 }
 
-// Deterministic uniform values in [lo, hi]
 #[allow(dead_code)]
 pub fn uniform_vec_f32(n: usize, lo: f32, hi: f32, seed: u64) -> Vec<f32> {
     assert!(hi > lo);
@@ -84,7 +89,6 @@ pub fn uniform_vec_f32(n: usize, lo: f32, hi: f32, seed: u64) -> Vec<f32> {
     out
 }
 
-// Deterministic shuffle (Fisher–Yates)
 #[allow(dead_code)]
 pub fn shuffle_with_seed<T>(xs: &mut [T], seed: u64) {
     let mut s = seed | 1;

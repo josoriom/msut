@@ -398,7 +398,8 @@ pub extern "C" fn find_peaks(
                     "integral": p.integral,
                     "intensity": p.intensity,
                     "ratio": p.ratio,
-                    "np": p.np
+                    "np": p.np,
+                    "noise": p.noise
                 })
             })
             .collect();
@@ -564,7 +565,7 @@ fn build_find_peaks_options(options: *const CPeakPOptions) -> FindPeaksOptions {
     let intensity = (o.intensity_threshold.is_finite() && o.intensity_threshold >= 0.0)
         .then_some(o.intensity_threshold);
     let width = (o.width_threshold > 0).then_some(o.width_threshold as usize);
-    let noise = (o.noise.is_finite() && o.noise >= 0.0).then_some(o.noise);
+    let noise = (o.noise.is_finite() && o.noise > 0.0).then_some(o.noise);
     let auto_noise = Some(o.auto_noise != 0);
     let allow_overlap = Some(o.allow_overlap != 0);
     let sn_ratio: Option<usize> = (o.sn_ratio > 0).then_some(o.sn_ratio as usize);

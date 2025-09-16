@@ -1,4 +1,4 @@
-# MU
+# MSUT
 
 - [R](wrappers/r/README.md)
 - [Python](wrappers/python/README.md)

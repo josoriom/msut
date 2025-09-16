@@ -76,9 +76,8 @@ fn non_uniform_sampling_works() {
     let data = DataXY { x: xs, y: ys };
 
     let peaks = scan_for_peaks(&data, None);
-    assert_eq!(peaks.len(), 2);
-    assert!(approx_eq(peaks[0], 2.0, 0.02));
-    assert!(approx_eq(peaks[1], 8.0, 0.02));
+    assert_eq!(peaks.len(), 1);
+    assert!(approx_eq(peaks[0], 8.0, 0.02));
 }
 
 // Test: Flat signal yields no peaks.

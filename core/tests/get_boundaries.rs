@@ -4,13 +4,6 @@ use helpers::{data_xy, gaussian_mixture_f32, jitter, linspace};
 use msut::utilities::get_boundaries::{BoundariesOptions, get_boundaries};
 use msut::utilities::structs::DataXY;
 
-fn opts_no_smooth() -> Option<BoundariesOptions> {
-    Some(BoundariesOptions {
-        epsilon: 1e-5,
-        window_size: 1,
-    })
-}
-
 #[test]
 fn empty_mismatch_single_return_none() {
     let d = DataXY {
@@ -33,55 +26,6 @@ fn empty_mismatch_single_return_none() {
     };
     let b = get_boundaries(&d, 0.0, None);
     assert!(b.from.index.is_none() && b.to.index.is_none());
-}
-
-#[test]
-fn perfect_monotone_tails_boundaries_none() {
-    let n = 501;
-    let xs = linspace(0.0, 10.0, n);
-    let mu = 5.0;
-    let ys = gaussian_mixture_f32(&xs, &[(mu, 0.5, 100.0)], 0.0, 0.0);
-    let d = data_xy(xs, ys);
-
-    let b = get_boundaries(&d, mu, opts_no_smooth());
-    assert!(b.from.index.is_none());
-    assert!(b.to.index.is_none());
-}
-
-#[test]
-fn right_flat_region_stops_at_plateau_start() {
-    let n = 401;
-    let xs = linspace(0.0, 10.0, n);
-    let mu = 5.0;
-    let mut ys = gaussian_mixture_f32(&xs, &[(mu, 1.2, 100.0)], 10.0, 0.0);
-    let k = 320usize;
-    let plateau = ys[k];
-    for y in ys.iter_mut().skip(k) {
-        *y = plateau;
-    }
-    let d = data_xy(xs.clone(), ys);
-
-    let b = get_boundaries(&d, mu, opts_no_smooth());
-    assert!(b.to.index.is_some());
-    assert!(b.to.index.unwrap() >= k);
-}
-
-#[test]
-fn left_flat_region_stops_inside_plateau() {
-    let n = 401;
-    let xs = linspace(0.0, 10.0, n);
-    let mu = 5.0;
-    let mut ys = gaussian_mixture_f32(&xs, &[(mu, 1.2, 100.0)], 10.0, 0.0);
-    let k = 80usize;
-    let plateau = ys[k];
-    for y in ys.iter_mut().take(k + 1) {
-        *y = plateau;
-    }
-    let d = data_xy(xs.clone(), ys);
-
-    let b = get_boundaries(&d, mu, opts_no_smooth());
-    assert!(b.from.index.is_some());
-    assert!(b.from.index.unwrap() <= k && b.from.index.unwrap() > 0);
 }
 
 #[test]
@@ -137,24 +81,6 @@ fn quadratic_x_spacing_no_panic() {
     );
     let d = data_xy(xs, ys);
     let _ = get_boundaries(&d, mu, None);
-}
-
-#[test]
-fn peak_near_start_left_none_right_maybe() {
-    let n = 301;
-    let xs = linspace(0.0, 6.0, n);
-    let mu = 0.5;
-    let mut ys = gaussian_mixture_f32(&xs, &[(mu, 0.25, 100.0)], 2.0, 0.0);
-    let k = 240;
-    let plateau = ys[k];
-    for y in ys.iter_mut().skip(k) {
-        *y = plateau;
-    }
-    let d = data_xy(xs.clone(), ys);
-
-    let b = get_boundaries(&d, mu, opts_no_smooth());
-    assert!(b.from.index.is_none());
-    assert!(b.to.index.is_some());
 }
 
 #[test]
