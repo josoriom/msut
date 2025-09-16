@@ -18,20 +18,12 @@ bin <- readBin(path, "raw", file.info(path)\$size)
 file <- msut::parse_mzml(bin)
 ```
 
-## Optional: view bin as data frames
-
-```r
-df <- msut::bin_to_df(file)
-chroms <- df\$Ok\$run\$chromatograms
-```
-
 ## Run peak picking from Chromatogram
 
 ```r
 library(parallel)
 transitions <- data.frame(
   idx    = c(0L, 5L, 18L),
-  id     = chroms\$id\[c(1, 6, 19)],
   rt     = c(1.20, 2.85, 3.50),
   window = c(0.40, 0.50, 0.60),
   stringsAsFactors = FALSE
