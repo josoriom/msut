@@ -19,6 +19,7 @@ pub struct Peak {
     pub intensity: f64,
     pub ratio: f64,
     pub np: i32,
+    pub noise: f64,
 }
 
 impl Default for Peak {
@@ -31,6 +32,7 @@ impl Default for Peak {
             intensity: 0.0,
             ratio: 0.0,
             np: 0,
+            noise: 0.0,
         }
     }
 }

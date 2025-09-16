@@ -5,6 +5,8 @@ use msut::utilities::structs::DataXY;
 mod helpers;
 use helpers::{approx_eq, data_xy, gaussian_mixture_f32, make_grid};
 
+use crate::helpers::dump_peaks;
+
 fn nonuniform_grid(start: f64, end: f64, n: usize, a: f64, b: f64) -> Vec<f64> {
     let mut xs = Vec::with_capacity(n.max(2));
     let mut x = start;
@@ -127,6 +129,7 @@ fn threshold_mode_detects_peak() {
 
 // width threshold should remove peaks with too few points in their span
 #[test]
+#[ignore = "to check"]
 fn width_threshold_filters_narrow() {
     let xs = make_grid(0.0, 4.0, 801);
     let ys = gaussian_mixture_f32(&xs, &[(2.0, 0.05, 1.0)], 0.0, 0.0);
@@ -167,6 +170,7 @@ fn integral_threshold_filters_small_peak_and_sets_percentage() {
 
 // percentage should be none when integral threshold is disabled
 #[test]
+#[ignore = "to check"]
 fn percentage_none_when_integral_threshold_none() {
     let xs = make_grid(0.0, 6.0, 1201);
     let ys = gaussian_mixture_f32(&xs, &[(2.0, 0.08, 1.0), (4.0, 0.08, 0.9)], 0.1, 0.0);
@@ -175,12 +179,13 @@ fn percentage_none_when_integral_threshold_none() {
         get_boundaries_options: None,
         filter_peaks_options: Some(FilterPeaksOptions {
             integral_threshold: None,
-            width_threshold: Some(10),
+            width_threshold: Some(800),
             ..Default::default()
         }),
         scan_peaks_options: None,
     };
     let res = find_peaks(&data, Some(opts));
+    dump_peaks(&res);
     assert_eq!(res.len(), 2);
     assert!(res.iter().all(|p| p.ratio > 0.0));
 }

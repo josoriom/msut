@@ -2,6 +2,9 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "rootDir": "src",
     "outDir": "lib",
     "declaration": true,
     "declarationMap": true,
@@ -9,11 +12,13 @@
       "node"
     ],
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "incremental": false
   },
   "include": [
     "src/index-node.ts",
-    "src/types/**/*.d.ts"
+    "src/types/**/*.d.ts",
+    "src/utilities/**/*.ts"
   ],
   "exclude": [
     "src/index-wasm.ts",

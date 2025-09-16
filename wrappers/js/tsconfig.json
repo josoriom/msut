@@ -11,7 +11,7 @@
   "include": [
     "src/index-wasm.ts",
     "src/index-node.ts",
-    "src/makeApi.ts",
+    "src/makeApi",
     "src/types/**/*.d.ts"
   ],
   "exclude": [
