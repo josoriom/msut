@@ -1,4 +1,6 @@
-#[derive(Debug)]
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
 pub struct DataXY {
     pub x: Vec<f64>,
     pub y: Vec<f32>,
