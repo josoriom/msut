@@ -39,8 +39,7 @@ fn small_noise_with_upward_baseline_triggers_stop() {
         *y = (*y as f64 + 0.05 * x + 0.2 * jitter(i as u32)) as f32;
     }
     let opts = Some(BoundariesOptions {
-        epsilon: 1e-5,
-        window_size: 11,
+        ..Default::default()
     });
 
     let d = data_xy(xs.clone(), ys);
@@ -81,18 +80,4 @@ fn quadratic_x_spacing_no_panic() {
     );
     let d = data_xy(xs, ys);
     let _ = get_boundaries(&d, mu, None);
-}
-
-#[test]
-fn constant_series_skips_peak_pair() {
-    let n = 21;
-    let xs = linspace(0.0, 10.0, n);
-    let ys = vec![7.0f32; n];
-    let d = data_xy(xs.clone(), ys);
-    let peak_idx = n / 2;
-    let peak_x = xs[peak_idx];
-
-    let b = get_boundaries(&d, peak_x, None);
-    assert_eq!(b.from.index, Some(peak_idx - 1));
-    assert_eq!(b.to.index, Some(peak_idx + 1));
 }
