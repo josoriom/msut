@@ -2,8 +2,6 @@
 
 ## Install
 
-You can install the R wrapper directly from GitHub:
-
 Using **remotes**:
 
 ```r
@@ -14,7 +12,7 @@ remotes::install_github("josoriom/msut", subdir = "wrappers/r")
 
 ```r
 path <- "/path/to/file.mzML"
-bin <- readBin(path, "raw", file.info(path)\$size)
+bin <- readBin(path, "raw", file.info(path)$size)
 file <- msut::parse_mzml(bin)
 ```
 
