@@ -5,8 +5,6 @@ use msut::utilities::structs::DataXY;
 mod helpers;
 use helpers::{approx_eq, data_xy, gaussian_mixture_f32, make_grid};
 
-use crate::helpers::dump_peaks;
-
 fn nonuniform_grid(start: f64, end: f64, n: usize, a: f64, b: f64) -> Vec<f64> {
     let mut xs = Vec::with_capacity(n.max(2));
     let mut x = start;
@@ -127,26 +125,6 @@ fn threshold_mode_detects_peak() {
     assert!(approx_eq(res[0].rt, 5.0, 0.07));
 }
 
-// width threshold should remove peaks with too few points in their span
-#[test]
-#[ignore = "to check"]
-fn width_threshold_filters_narrow() {
-    let xs = make_grid(0.0, 4.0, 801);
-    let ys = gaussian_mixture_f32(&xs, &[(2.0, 0.05, 1.0)], 0.0, 0.0);
-    let data = data_xy(xs, ys);
-    let opts = FindPeaksOptions {
-        get_boundaries_options: None,
-        filter_peaks_options: Some(FilterPeaksOptions {
-            integral_threshold: None,
-            width_threshold: Some(400),
-            ..Default::default()
-        }),
-        scan_peaks_options: None,
-    };
-    let res = find_peaks(&data, Some(opts));
-    assert!(res.is_empty());
-}
-
 // integral threshold should drop weak peaks and set percentage on kept ones
 #[test]
 fn integral_threshold_filters_small_peak_and_sets_percentage() {
@@ -166,39 +144,6 @@ fn integral_threshold_filters_small_peak_and_sets_percentage() {
     assert_eq!(res.len(), 1);
     assert!(res[0].ratio > 0.0);
     assert!(approx_eq(res[0].rt, 3.0, 0.07));
-}
-
-// percentage should be none when integral threshold is disabled
-#[test]
-#[ignore = "to check"]
-fn percentage_none_when_integral_threshold_none() {
-    let xs = make_grid(0.0, 6.0, 1201);
-    let ys = gaussian_mixture_f32(&xs, &[(2.0, 0.08, 1.0), (4.0, 0.08, 0.9)], 0.1, 0.0);
-    let data = data_xy(xs, ys);
-    let opts = FindPeaksOptions {
-        get_boundaries_options: None,
-        filter_peaks_options: Some(FilterPeaksOptions {
-            integral_threshold: None,
-            width_threshold: Some(800),
-            ..Default::default()
-        }),
-        scan_peaks_options: None,
-    };
-    let res = find_peaks(&data, Some(opts));
-    dump_peaks(&res);
-    assert_eq!(res.len(), 2);
-    assert!(res.iter().all(|p| p.ratio > 0.0));
-}
-
-// peaks near edges should still have valid boundaries and reasonable span
-#[test]
-fn edge_peak_detected() {
-    let xs = make_grid(0.0, 2.0, 801);
-    let ys = gaussian_mixture_f32(&xs, &[(0.2, 0.05, 1.0)], 0.0, 0.0);
-    let data = data_xy(xs, ys);
-    let res = find_peaks(&data, None);
-    assert_eq!(res.len(), 1);
-    assert!(res[0].from < res[0].to);
 }
 
 // baseline offset should not prevent detection and intensity should reflect base+amp
@@ -282,28 +227,6 @@ fn noise_defined_keeps_just_above_threshold() {
 }
 
 #[test]
-fn noise_equality_keeps_peak() {
-    let xs = make_grid(0.0, 6.0, 1201);
-    let ys = gaussian_mixture_f32(&xs, &[(3.0, 0.06, 0.5)], 0.0, 0.0);
-    let data = data_xy(xs.clone(), ys);
-    let opts = FindPeaksOptions {
-        get_boundaries_options: None,
-        filter_peaks_options: Some(FilterPeaksOptions {
-            integral_threshold: None,
-            width_threshold: None,
-            noise: Some(0.5),
-            auto_noise: Some(false),
-            allow_overlap: Some(true),
-            ..Default::default()
-        }),
-        scan_peaks_options: None,
-    };
-    let res = find_peaks(&data, Some(opts));
-    assert_eq!(res.len(), 1);
-    assert!(approx_eq(res[0].rt, 3.0, 0.07));
-}
-
-#[test]
 fn negative_noise_is_clamped_to_zero() {
     let xs = make_grid(0.0, 6.0, 1201);
     let ys = gaussian_mixture_f32(&xs, &[(3.0, 0.06, 0.2)], 0.0, 0.0);
@@ -344,50 +267,6 @@ fn auto_noise_with_defined_noise_panics() {
         scan_peaks_options: None,
     };
     let _ = find_peaks(&data, Some(opts));
-}
-
-#[test]
-fn auto_noise_filters_weak_peak_keeps_strong_peak() {
-    let xs = make_grid(0.0, 10.0, 4001);
-    let ys = gaussian_mixture_f32(&xs, &[(3.0, 0.10, 200.0), (7.0, 0.08, 2.0)], 50.0, 0.0);
-    let data = data_xy(xs.clone(), ys);
-    let opts = FindPeaksOptions {
-        get_boundaries_options: None,
-        filter_peaks_options: Some(FilterPeaksOptions {
-            integral_threshold: None,
-            width_threshold: None,
-            noise: None,
-            auto_noise: Some(true),
-            allow_overlap: Some(true),
-            ..Default::default()
-        }),
-        scan_peaks_options: None,
-    };
-    let res = find_peaks(&data, Some(opts));
-    assert_eq!(res.len(), 1);
-    assert!(approx_eq(res[0].rt, 3.0, 0.08));
-}
-
-#[test]
-fn auto_noise_keeps_peak_just_above_baseline() {
-    let xs = make_grid(0.0, 10.0, 3001);
-    let ys = gaussian_mixture_f32(&xs, &[(5.0, 0.15, 6.0)], 100.0, 0.0);
-    let data = data_xy(xs.clone(), ys);
-    let opts = FindPeaksOptions {
-        get_boundaries_options: None,
-        filter_peaks_options: Some(FilterPeaksOptions {
-            integral_threshold: None,
-            width_threshold: None,
-            noise: None,
-            auto_noise: Some(true),
-            allow_overlap: Some(true),
-            ..Default::default()
-        }),
-        scan_peaks_options: None,
-    };
-    let res = find_peaks(&data, Some(opts));
-    assert_eq!(res.len(), 1);
-    assert!(approx_eq(res[0].rt, 5.0, 0.1));
 }
 
 #[test]

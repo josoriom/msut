@@ -14,7 +14,11 @@ use utilities::{
     get_peak::get_peak as get_peak_rs,
     get_peaks_from_chrom::get_peaks_from_chrom as get_peaks_from_chrom_rs,
     get_peaks_from_eic::get_peaks_from_eic as get_peaks_from_eic_rs,
-    parse::{decode::decode, encode::encode, parse_mzml::parse_mzml as parse_mzml_rs},
+    parse::{
+        decode::{decode, metadata_to_json},
+        encode::encode,
+        parse_mzml::parse_mzml as parse_mzml_rs,
+    },
     scan_for_peaks::ScanPeaksOptions,
     structs::{DataXY, FromTo, Roi},
 };
@@ -94,9 +98,36 @@ pub unsafe extern "C" fn parse_mzml(
     }
     let res = catch_unwind(AssertUnwindSafe(|| -> Result<(), c_int> {
         let data = unsafe { slice::from_raw_parts(data_ptr, data_len) };
-        let parsed = parse_mzml_rs(data).map_err(|_| ERR_PARSE)?;
+        let parsed = parse_mzml_rs(data, false).map_err(|_| ERR_PARSE)?;
         let bin = encode(&parsed);
         write_buf(out_data, bin.into_boxed_slice());
+        Ok(())
+    }));
+    match res {
+        Ok(Ok(())) => OK,
+        Ok(Err(code)) => code,
+        Err(_) => ERR_PANIC,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn parse_mzml_to_json(
+    data_ptr: *const u8,
+    data_len: usize,
+    out_json: *mut Buf,
+    out_blob: *mut Buf,
+) -> c_int {
+    if data_ptr.is_null() || out_json.is_null() || out_blob.is_null() {
+        return ERR_INVALID_ARGS;
+    }
+    let res = catch_unwind(AssertUnwindSafe(|| -> Result<(), c_int> {
+        let data = unsafe { slice::from_raw_parts(data_ptr, data_len) };
+        let parsed = parse_mzml_rs(data, true).map_err(|_| ERR_PARSE)?;
+        let meta = metadata_to_json(&parsed).map_err(|_| ERR_PARSE)?;
+        let blob = encode(&parsed);
+
+        write_buf(out_json, meta.into_boxed_slice());
+        write_buf(out_blob, blob.into_boxed_slice());
         Ok(())
     }));
     match res {
@@ -424,7 +455,7 @@ pub extern "C" fn find_noise_level(y_ptr: *const f32, len: usize) -> f32 {
         find_noise_level_rs(ys)
     };
     match catch_unwind(AssertUnwindSafe(compute)) {
-        Ok(noise) => noise,
+        Ok(noise) => noise as f32,
         Err(_) => f32::INFINITY,
     }
 }
@@ -552,8 +583,7 @@ fn build_find_peaks_options(options: *const CPeakPOptions) -> FindPeaksOptions {
                 window_size: ws,
             }),
             get_boundaries_options: Some(BoundariesOptions {
-                epsilon: EPS,
-                window_size: ws,
+                ..Default::default()
             }),
             filter_peaks_options: None,
         };
@@ -584,8 +614,7 @@ fn build_find_peaks_options(options: *const CPeakPOptions) -> FindPeaksOptions {
             window_size: ws,
         }),
         get_boundaries_options: Some(BoundariesOptions {
-            epsilon: EPS,
-            window_size: ws,
+            ..Default::default()
         }),
         filter_peaks_options: Some(filter),
     }

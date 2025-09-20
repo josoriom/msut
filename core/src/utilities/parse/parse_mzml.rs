@@ -173,7 +173,31 @@ struct Scratch {
     zlib_buf: Vec<u8>,
 }
 
-pub fn parse_mzml(bytes: &[u8]) -> Result<MzML, String> {
+pub fn parse_mzml(bytes: &[u8], slim: bool) -> Result<MzML, String> {
+    if slim {
+        let run_header = parse_run_header(bytes);
+        let spectra = parse_spectra_internal(bytes)?;
+        let chromatograms = parse_chromatograms_linear(bytes)?;
+        let run = run_header.map(|mut r| {
+            r.spectra = spectra;
+            r.chromatograms = chromatograms;
+            r
+        });
+
+        return Ok(MzML {
+            cv_list: Vec::new(),
+            file_description: None,
+            referenceable_param_groups: Vec::new(),
+            sample_list: Vec::new(),
+            instrument_configurations: Vec::new(),
+            software_list: Vec::new(),
+            data_processing_list: Vec::new(),
+            acquisition_settings_list: Vec::new(),
+            run,
+            index_list: None,
+        });
+    }
+
     let cv_list = parse_cv_list(bytes);
     let file_description = parse_file_description(bytes);
     let referenceable_param_groups = parse_ref_param_groups(bytes);

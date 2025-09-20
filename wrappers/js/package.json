@@ -29,6 +29,7 @@
     "node": ">=18"
   },
   "scripts": {
+    "build-cdn": "npm run tsc-esm && npx webpack && cp ../../artifacts/wasm/msut.wasm dist/msut.wasm",
     "install": "node-gyp rebuild",
     "build": "npm run tsc",
     "check-types": "tsc --noEmit",

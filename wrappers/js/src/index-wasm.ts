@@ -3,8 +3,6 @@ import {
   type Exports,
   type FindPeaksOptions,
   type Peak,
-  type ChromPeakRow,
-  type EicPeakRow,
 } from "./makeApi.js";
 import type { MzML } from "./types/mzml.js";
 
@@ -40,8 +38,6 @@ const freshInstance = (userImports: WebAssembly.Imports = {}): Exports => {
   return makeApi(instance);
 };
 
-// --- Public API ---
-
 export function parseMzML(
   data: Uint8Array | ArrayBuffer,
   options: { slim?: boolean; json?: boolean; pretty?: boolean } = {}
@@ -67,7 +63,6 @@ export const calculateEic = (
   ) as EicResult;
 };
 
-// Match R: get_peak(x,y,rt,range,options)
 export const getPeak = (
   x: Float64Array | ArrayLike<number>,
   y: Float32Array | ArrayLike<number>,
@@ -81,42 +76,6 @@ export const getPeak = (
   const y32 =
     y instanceof Float32Array ? y : new Float32Array(y as ArrayLike<number>);
   return freshInstance({}).getPeak(x64, y32, rt, range, options) as Peak;
-};
-
-// Match R: get_peaks_from_chrom(bin, df-like items)
-export const getPeaksFromChrom = (
-  bin: Uint8Array | ArrayBuffer,
-  items: { idx: number; rt: number; window: number }[],
-  options: FindPeaksOptions = {},
-  cores = 1
-): ChromPeakRow[] => {
-  if (!MOD) throw new Error("ms-utils WASM not initialized");
-  const bytes = bin instanceof Uint8Array ? bin : new Uint8Array(bin);
-  return freshInstance({}).getPeaksFromChrom(
-    bytes,
-    items,
-    options,
-    cores
-  ) as ChromPeakRow[];
-};
-
-// Match R: get_peaks_from_eic(bin, items, fromTo, options, cores)
-export const getPeaksFromEic = (
-  bin: Uint8Array | ArrayBuffer,
-  items: { id?: string; rt: number; mz: number; ranges: number }[],
-  fromTo: { from: number; to: number },
-  options: FindPeaksOptions = {},
-  cores = 1
-): EicPeakRow[] => {
-  if (!MOD) throw new Error("ms-utils WASM not initialized");
-  const bytes = bin instanceof Uint8Array ? bin : new Uint8Array(bin);
-  return freshInstance({}).getPeaksFromEic(
-    bytes,
-    items,
-    fromTo,
-    options,
-    cores
-  ) as EicPeakRow[];
 };
 
 export const findPeaks = (
@@ -136,31 +95,11 @@ export const findPeaks = (
   return freshInstance({}).findPeaks(x64, y32, options) as Peak[];
 };
 
-export type ScanForPeaksOptions = { epsilon?: number; windowSize?: number };
-
-export const scanForPeaks = (
-  x: Float64Array | ArrayLike<number>,
-  y: Float32Array | ArrayLike<number>,
-  options: ScanForPeaksOptions = {}
-): Float64Array => {
-  if (!MOD) throw new Error("ms-utils WASM not initialized");
-  const x64 =
-    x instanceof Float64Array ? x : new Float64Array(x as ArrayLike<number>);
-  const y32 =
-    y instanceof Float32Array ? y : new Float32Array(y as ArrayLike<number>);
-  if (x64.length !== y32.length)
-    throw new Error(
-      `scanForPeaks: x.length (${x64.length}) != y.length (${y32.length}).`
-    );
-  return freshInstance({}).scanForPeaks(x64, y32, options) as Float64Array;
-};
-
 export const findNoiseLevel = (y: Float32Array): number => {
   if (!MOD) throw new Error("ms-utils WASM not initialized");
   return freshInstance({}).findNoiseLevel(y);
 };
 
-// one-time module compile
 const dataUrlToBytes = (dataUrl: string): Uint8Array => {
   const b64 = dataUrl.split(",")[1] ?? "";
   if (typeof atob === "function") {

@@ -138,9 +138,9 @@ pub fn scan_for_peaks_across_windows(
         } else {
             0.0
         };
-        let valley_gate = noise.max(0.92 * h_top);
+        let valley_gate = noise.max(0.92_f64 * (h_top as f64));
 
-        if valley > valley_gate || rel_drop < 0.08 {
+        if (valley as f64) > valley_gate || rel_drop < 0.08_f32 {
             merged.push(if ha >= hb { (xa, ha) } else { (xb, hb) });
             i += 2;
         } else {

@@ -82,7 +82,7 @@ windows-amd64:
 	    RUSTFLAGS="-C linker=x86_64-w64-mingw32-gcc" \
 	      cargo build --manifest-path $(CRATE_MANIFEST) --release --target x86_64-pc-windows-gnu'
 	mkdir -p $(ARTIFACTS)/windows-x86_64
-	cp core/target-windows-amd64/x86_64-pc-windows-gnu/release/$(CRATE).dll $(ARTIFACTS)/windows-x86_64/
+	cp core/target-windows-amd64/x86_64-pc-windows-gnu/release/$(CRATE).dll $(ARTIFACTS)/windows-x86_64/lib$(CRATE).dll
 
 WINDOWS_ARM64_IMAGE := dockcross/windows-arm64:latest
 WINDOWS_ARM64_TARGET := aarch64-pc-windows-gnullvm

@@ -154,7 +154,7 @@ export function calculateEic(
   mzTol = 0.005
 ) {
   const b = toBuffer(bin);
-  const fn = native.calculateEic || native.binToEic;
+  const fn = native.calculateEic;
   return fn(b, targets, from, to, ppmTol, mzTol) as {
     x: Float64Array;
     y: Float32Array;

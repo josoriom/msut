@@ -6,6 +6,7 @@ Cargo.lock
 **/lib-esm
 **/dist
 **/data
+**/build
 **/target
 **/target-linux-amd64
 **/target-linux-arm64

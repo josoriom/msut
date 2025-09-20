@@ -1,4 +1,5 @@
 pub mod find_noise_level;
+pub use find_noise_level::find_noise_level;
 pub mod find_peaks;
 pub mod get_boundaries;
 pub mod get_peak;

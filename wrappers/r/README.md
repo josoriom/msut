@@ -2,8 +2,6 @@
 
 ## Install
 
-You can install the R wrapper directly from GitHub:
-
 Using **remotes**:
 
 ```r
@@ -14,15 +12,8 @@ remotes::install_github("josoriom/msut", subdir = "wrappers/r")
 
 ```r
 path <- "/path/to/file.mzML"
-bin <- readBin(path, "raw", file.info(path)\$size)
+bin <- readBin(path, "raw", file.info(path)$size)
 file <- msut::parse_mzml(bin)
-```
-
-## Optional: view bin as data frames
-
-```r
-df <- msut::bin_to_df(file)
-chroms <- df\$Ok\$run\$chromatograms
 ```
 
 ## Run peak picking from Chromatogram
@@ -31,7 +22,6 @@ chroms <- df\$Ok\$run\$chromatograms
 library(parallel)
 transitions <- data.frame(
   idx    = c(0L, 5L, 18L),
-  id     = chroms\$id\[c(1, 6, 19)],
   rt     = c(1.20, 2.85, 3.50),
   window = c(0.40, 0.50, 0.60),
   stringsAsFactors = FALSE

@@ -1,268 +1,265 @@
-use crate::utilities::kmeans::{Point, kmeans};
-use crate::utilities::utilities::is_finite_positive;
+use std::borrow::Cow;
+use std::f64;
 
-pub fn find_noise_level(intensities: &[f32]) -> f32 {
-    let n = intensities.len();
-    if n == 0 {
-        return f32::INFINITY;
-    }
-    let est = noise_from_series(intensities);
-    if est.is_finite() && est > 0.0 {
-        est
-    } else {
-        f32::INFINITY
-    }
-}
+use crate::utilities::kmeans;
 
-fn noise_from_series(y: &[f32]) -> f32 {
-    let n = y.len();
-    if n < 128 {
-        return f32::INFINITY;
-    }
-    let (w, s) = window_plan(n);
-    let (bas, caps, spans) = window_low_quantiles(y, w, s, 0.20, 0.30);
-    if bas.len() < 4 {
-        let mut lows = Vec::<f32>::new();
-        for (i, (a, b)) in spans.iter().enumerate() {
-            let cap = caps[i];
-            for &v in &y[*a..*b] {
-                if is_finite_positive(v) && v <= cap {
-                    lows.push(v);
-                }
-            }
-        }
-        if lows.is_empty() {
-            let mut v: Vec<f32> = y
-                .iter()
-                .copied()
-                .filter(|x| is_finite_positive(*x))
-                .collect();
-            if v.is_empty() {
-                return f32::INFINITY;
-            }
-            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            return vec_quantile_sorted(&v, 0.80);
-        }
-        lows.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        return vec_quantile_sorted(&lows, 0.995);
+pub fn find_noise_level<'a, Y>(y: Y) -> f64
+where
+    Y: IntoF64Slice<'a>,
+{
+    let y = y.into_f64_slice();
+    let points = scan_points(y.as_ref());
+    if points.is_empty() {
+        return 0.0;
     }
 
-    let mut logs = Vec::<f32>::with_capacity(bas.len());
-    for &b in &bas {
-        logs.push(b.log10());
-    }
-
-    let sep = kmeans_1d_logs(&logs, 30);
-    let thr_log = if let Some((m0, m1)) = sep {
-        let d = (m1 - m0).abs();
-        if d < 0.12 {
-            vec_quantile_sorted(
-                &{
-                    let mut t = logs.clone();
-                    t.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                    t
-                },
-                0.75,
-            )
-        } else {
-            0.5 * (m0 + m1)
-        }
-    } else {
-        vec_quantile_sorted(
-            &{
-                let mut t = logs.clone();
-                t.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                t
-            },
-            0.75,
-        )
+    let params = ClusterParams {
+        log_n: true,
+        log_i: true,
+        w_n: 2.0,
+        w_i: 1.0,
     };
+    let labels = cluster_intensities(&points, params);
 
-    let thr = 10f32.powf(thr_log);
-
-    let mut sel = vec![false; bas.len()];
-    let mut any = 0usize;
-    for i in 0..bas.len() {
-        if bas[i] >= thr {
-            sel[i] = true;
-            any += 1;
+    let mut max_in_noise = f64::NEG_INFINITY;
+    for (i, &(_n, intensity)) in points.iter().enumerate() {
+        if labels[i] == 0 && intensity.is_finite() && intensity > max_in_noise {
+            max_in_noise = intensity;
         }
     }
 
-    let mut pool = if any > 0 {
-        pool_from_windows(y, &spans, &caps, &sel)
+    if max_in_noise.is_finite() {
+        max_in_noise
     } else {
-        Vec::new()
-    };
-
-    if pool.len() < y.len() / 200 {
-        let mut idx: Vec<usize> = (0..bas.len()).collect();
-        idx.sort_by(|&i, &j| bas[i].partial_cmp(&bas[j]).unwrap());
-        let keep = (bas.len() as f32 * 0.25).ceil() as usize;
-        for k in 0..idx.len() {
-            sel[idx[k]] = false;
-        }
-        for k in (idx.len().saturating_sub(keep))..idx.len() {
-            sel[idx[k]] = true;
-        }
-        pool = pool_from_windows(y, &spans, &caps, &sel);
+        0.0
     }
-
-    if pool.is_empty() {
-        let mut lows = Vec::<f32>::new();
-        for (i, (a, b)) in spans.iter().enumerate() {
-            let cap = caps[i];
-            for &v in &y[*a..*b] {
-                if is_finite_positive(v) && v <= cap {
-                    lows.push(v);
-                }
-            }
-        }
-        if lows.is_empty() {
-            let mut v: Vec<f32> = y
-                .iter()
-                .copied()
-                .filter(|x| is_finite_positive(*x))
-                .collect();
-            if v.is_empty() {
-                return f32::INFINITY;
-            }
-            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            return vec_quantile_sorted(&v, 0.80);
-        }
-        lows.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        return vec_quantile_sorted(&lows, 0.995);
-    }
-
-    pool.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    vec_quantile_sorted(&pool, 0.995)
 }
 
-fn kmeans_1d_logs(x: &[f32], _iters: usize) -> Option<(f32, f32)> {
-    if x.len() < 2 {
-        return None;
-    }
+pub trait IntoF64Slice<'a> {
+    fn into_f64_slice(self) -> Cow<'a, [f64]>;
+}
 
-    let mut minv = f32::INFINITY;
-    let mut maxv = f32::NEG_INFINITY;
-    for &v in x {
-        if v < minv {
-            minv = v;
+impl<'a> IntoF64Slice<'a> for &'a [f64] {
+    fn into_f64_slice(self) -> Cow<'a, [f64]> {
+        Cow::Borrowed(self)
+    }
+}
+impl<'a> IntoF64Slice<'a> for &'a Vec<f64> {
+    fn into_f64_slice(self) -> Cow<'a, [f64]> {
+        Cow::Borrowed(self.as_slice())
+    }
+}
+impl<'a> IntoF64Slice<'a> for Vec<f64> {
+    fn into_f64_slice(self) -> Cow<'a, [f64]> {
+        Cow::Owned(self)
+    }
+}
+
+impl<'a> IntoF64Slice<'a> for &'a [f32] {
+    fn into_f64_slice(self) -> Cow<'a, [f64]> {
+        let mut v = Vec::with_capacity(self.len());
+        for &x in self {
+            v.push(x as f64);
         }
-        if v > maxv {
-            maxv = v;
+        Cow::Owned(v)
+    }
+}
+impl<'a> IntoF64Slice<'a> for &'a Vec<f32> {
+    fn into_f64_slice(self) -> Cow<'a, [f64]> {
+        let mut v = Vec::with_capacity(self.len());
+        for &x in self {
+            v.push(x as f64);
         }
+        Cow::Owned(v)
     }
-    if !minv.is_finite() || !maxv.is_finite() || maxv <= minv {
-        return None;
+}
+impl<'a> IntoF64Slice<'a> for Vec<f32> {
+    fn into_f64_slice(self) -> Cow<'a, [f64]> {
+        let mut v = Vec::with_capacity(self.len());
+        for x in self {
+            v.push(x as f64);
+        }
+        Cow::Owned(v)
     }
+}
 
-    let points: Vec<Point> = x.iter().map(|&v| vec![v as f64]).collect();
-    let centroids_init: Vec<Point> = vec![vec![minv as f64], vec![maxv as f64]];
+#[derive(Clone, Copy)]
+struct ClusterParams {
+    log_n: bool,
+    log_i: bool,
+    w_n: f64,
+    w_i: f64,
+}
 
-    let res = kmeans(&points, centroids_init);
-    if res.len() < 2 {
-        return None;
+fn scan_points(y: &[f64]) -> Vec<(usize, f64)> {
+    let mut runs: Vec<(usize, f64)> = Vec::new();
+    if y.is_empty() {
+        return runs;
     }
+    let min = x_min_value(y);
 
-    let c0 = res[0][0] as f32;
-    let c1 = res[1][0] as f32;
-    if c0.is_finite() && c1.is_finite() {
-        if c0 < c1 {
-            Some((c0, c1))
+    let mut in_run = false;
+    let mut count: usize = 0;
+    let mut max_val = f64::NEG_INFINITY;
+
+    for &v in y {
+        let is_non_zero = v.is_finite() && v.abs() > min;
+        if is_non_zero {
+            if !in_run {
+                in_run = true;
+                count = 1;
+                max_val = v;
+            } else {
+                count += 1;
+                if v > max_val {
+                    max_val = v;
+                }
+            }
         } else {
-            Some((c1, c0))
-        }
-    } else {
-        None
-    }
-}
-
-#[inline]
-fn vec_quantile_sorted(v: &[f32], q: f32) -> f32 {
-    if v.is_empty() {
-        return f32::NAN;
-    }
-    if v.len() == 1 {
-        return v[0];
-    }
-    let r = (q.clamp(0.0, 1.0) * (v.len() as f32 - 1.0)) as f32;
-    let i = r.floor() as usize;
-    let j = r.ceil() as usize;
-    if i == j {
-        v[i]
-    } else {
-        let w = r - i as f32;
-        v[i] * (1.0 - w) + v[j] * w
-    }
-}
-
-fn window_plan(n: usize) -> (usize, usize) {
-    let mut w = (n / 64).max(256).min(4096);
-    if w > n {
-        w = n;
-    }
-    let s = (w / 4).max(64);
-    (w, s)
-}
-
-fn window_low_quantiles(
-    y: &[f32],
-    w: usize,
-    s: usize,
-    q_low: f32,
-    q_cap: f32,
-) -> (Vec<f32>, Vec<f32>, Vec<(usize, usize)>) {
-    let mut bas = Vec::<f32>::new();
-    let mut caps = Vec::<f32>::new();
-    let mut spans = Vec::<(usize, usize)>::new();
-    let n = y.len();
-    if n == 0 {
-        return (bas, caps, spans);
-    }
-    let mut i = 0usize;
-    while i < n {
-        let a = i;
-        let b = (i + w).min(n);
-        let mut v: Vec<f32> = y[a..b]
-            .iter()
-            .copied()
-            .filter(|x| is_finite_positive(*x))
-            .collect();
-        if v.len() >= 32 {
-            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let p20 = vec_quantile_sorted(&v, q_low);
-            let p30 = vec_quantile_sorted(&v, q_cap).max(p20);
-            if p20.is_finite() && p20 > 0.0 {
-                bas.push(p20);
-                caps.push(p30);
-                spans.push((a, b));
-            }
-        }
-        if b == n {
-            break;
-        }
-        i = a + s;
-    }
-    (bas, caps, spans)
-}
-
-fn pool_from_windows(
-    y: &[f32],
-    spans: &[(usize, usize)],
-    caps: &[f32],
-    selector: &[bool],
-) -> Vec<f32> {
-    let mut pool = Vec::<f32>::new();
-    for (idx, &(a, b)) in spans.iter().enumerate() {
-        if selector[idx] {
-            let cap = caps[idx];
-            for &v in &y[a..b] {
-                if is_finite_positive(v) && v <= cap {
-                    pool.push(v);
-                }
+            if in_run {
+                runs.push((count, max_val));
+                in_run = false;
+                count = 0;
+                max_val = f64::NEG_INFINITY;
             }
         }
     }
-    pool
+
+    if in_run {
+        runs.push((count, max_val));
+    }
+
+    runs
+}
+
+fn cluster_intensities(points: &[(usize, f64)], params: ClusterParams) -> Vec<usize> {
+    if points.is_empty() {
+        return Vec::new();
+    }
+
+    let mut tx: Vec<f64> = Vec::with_capacity(points.len());
+    let mut ty: Vec<f64> = Vec::with_capacity(points.len());
+    for &(n, i) in points.iter() {
+        let a = if params.log_n {
+            log1p_safe(n as f64)
+        } else {
+            n as f64
+        };
+        let b = if params.log_i { log1p_safe(i) } else { i };
+        tx.push(a);
+        ty.push(b);
+    }
+
+    let mx = x_mean(&tx);
+    let my = x_mean(&ty);
+    let sx = x_stddev(&tx);
+    let sy = x_stddev(&ty);
+    let sx = if sx == 0.0 { 1.0 } else { sx };
+    let sy = if sy == 0.0 { 1.0 } else { sy };
+
+    let wx = params.w_n.sqrt();
+    let wy = params.w_i.sqrt();
+
+    let mut weighted: Vec<[f64; 2]> = Vec::with_capacity(points.len());
+    for i in 0..points.len() {
+        let a = (tx[i] - mx) / sx;
+        let b = (ty[i] - my) / sy;
+        weighted.push([a * wx, b * wy]);
+    }
+
+    let seeds = farthest_seeds(&weighted);
+
+    let mut km_points: Vec<Vec<f64>> = Vec::with_capacity(weighted.len());
+    for p in &weighted {
+        km_points.push(vec![p[0], p[1]]);
+    }
+    let centroids = kmeans(&km_points, seeds);
+
+    let mut centroids_sorted = centroids.clone();
+    centroids_sorted.sort_by(|a, b| a[1].partial_cmp(&b[1]).unwrap());
+
+    // println!("{centroids:#?}");
+    // println!("{centroids_sorted:#?}");
+
+    let mut result: Vec<usize> = Vec::with_capacity(weighted.len());
+    for p in weighted.iter() {
+        let mut idx = 0usize;
+        let mut best = {
+            let dx = p[0] - centroids_sorted[0][0];
+            let dy = p[1] - centroids_sorted[0][1];
+            (dx * dx + dy * dy).sqrt()
+        };
+        for j in 1..centroids_sorted.len() {
+            let dx = p[0] - centroids_sorted[j][0];
+            let dy = p[1] - centroids_sorted[j][1];
+            let d = (dx * dx + dy * dy).sqrt();
+            if d < best {
+                best = d;
+                idx = j;
+            }
+        }
+        result.push(idx);
+    }
+
+    result
+}
+
+fn farthest_seeds(weighted: &[[f64; 2]]) -> Vec<Vec<f64>> {
+    let mut min = weighted[0];
+    let mut max = weighted[0];
+    for &q in weighted.iter() {
+        if q[1] < min[1] {
+            min = q;
+        }
+        if q[1] > max[1] {
+            max = q;
+        }
+    }
+    vec![vec![min[0], min[1]], vec![max[0], max[1]]]
+}
+
+fn x_min_value(a: &[f64]) -> f64 {
+    let mut m = f64::INFINITY;
+    for &v in a {
+        if v.is_finite() && v < m {
+            m = v;
+        }
+    }
+    if m.is_finite() { m } else { 0.0 }
+}
+
+fn x_mean(a: &[f64]) -> f64 {
+    if a.is_empty() {
+        return 0.0;
+    }
+    let mut s = 0.0;
+    let mut n = 0usize;
+    for &v in a {
+        if v.is_finite() {
+            s += v;
+            n += 1;
+        }
+    }
+    if n == 0 { 0.0 } else { s / n as f64 }
+}
+
+fn x_stddev(a: &[f64]) -> f64 {
+    if a.is_empty() {
+        return 0.0;
+    }
+    let mu = x_mean(a);
+    let mut s = 0.0;
+    let mut n = 0usize;
+    for &v in a {
+        if v.is_finite() {
+            let d = v - mu;
+            s += d * d;
+            n += 1;
+        }
+    }
+    if n == 0 { 0.0 } else { (s / n as f64).sqrt() }
+}
+
+fn log1p_safe(v: f64) -> f64 {
+    (0.0_f64.max(v)).ln_1p()
 }
