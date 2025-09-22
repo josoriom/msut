@@ -1,4 +1,7 @@
-use crate::utilities::parse::{decode::decode, parse_mzml::MzML};
+use crate::utilities::{
+    parse::{decode::decode, parse_mzml::MzML},
+    structs::FromTo,
+};
 
 #[derive(Clone, Copy)]
 pub struct EicOptions {
@@ -23,7 +26,7 @@ pub struct Eic {
 pub fn calculate_eic_from_bin1(
     bin1: &[u8],
     target_masses: &str,
-    from_to: (f64, f64),
+    from_to: FromTo,
     options: EicOptions,
 ) -> Result<Eic, &'static str> {
     let mzml = decode(bin1).map_err(|_| "decode BIN1 failed")?;
@@ -33,12 +36,10 @@ pub fn calculate_eic_from_bin1(
 pub fn calculate_eic_from_mzml(
     mzml: &MzML,
     target_masses: &str,
-    from_to: (f64, f64),
+    from_to: FromTo,
     options: EicOptions,
 ) -> Result<Eic, &'static str> {
-    let (from, to) = from_to;
     let run = mzml.run.as_ref().ok_or("no run")?;
-
     let mut ms1_idx = Vec::with_capacity(run.spectra.len());
     let mut times = Vec::with_capacity(run.spectra.len());
     for (i, s) in run.spectra.iter().enumerate() {
@@ -54,8 +55,8 @@ pub fn calculate_eic_from_mzml(
         return Err("no valid retention_time");
     }
 
-    let from_idx = lower_bound(&times, from);
-    let to_idx = lower_bound(&times, to);
+    let from_idx = lower_bound(&times, from_to.from);
+    let to_idx = lower_bound(&times, from_to.to);
     let (start, end) = if from_idx <= to_idx {
         (from_idx, to_idx)
     } else {
