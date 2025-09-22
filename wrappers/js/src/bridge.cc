@@ -41,10 +41,10 @@ typedef struct
   int32_t auto_noise;
   int32_t allow_overlap;
   int32_t window_size;
-  int32_t sn_ratio;
+  double sn_ratio;
 } CPeakPOptions;
 
-static_assert(sizeof(CPeakPOptions) == 48, "CPeakPOptions must be 48 bytes");
+static_assert(sizeof(CPeakPOptions) == 56, "CPeakPOptions must be 56 bytes");
 
 typedef int32_t (*fn_parse_mzml)(const unsigned char *, size_t, Buf *);
 typedef int32_t (*fn_bin_to_json)(const unsigned char *, size_t, Buf *);
