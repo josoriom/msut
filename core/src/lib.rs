@@ -6,8 +6,8 @@ use std::{
 };
 
 pub mod utilities;
-use utilities::parse::calculate_eic::{EicOptions, calculate_eic_from_bin1};
 use utilities::{
+    calculate_eic::{EicOptions, calculate_eic_from_bin1},
     find_noise_level::find_noise_level as find_noise_level_rs,
     find_peaks::{FilterPeaksOptions, FindPeaksOptions, find_peaks as find_peaks_rs},
     get_boundaries::BoundariesOptions,
@@ -47,7 +47,7 @@ pub struct CPeakPOptions {
     pub auto_noise: c_int,
     pub allow_overlap: c_int,
     pub window_size: c_int,
-    pub sn_ratio: c_int,
+    pub sn_ratio: f64,
 }
 
 #[cfg(all(target_arch = "wasm32", not(target_os = "wasi")))]
@@ -507,7 +507,10 @@ pub unsafe extern "C" fn calculate_eic(
         let eic = calculate_eic_from_bin1(
             bin,
             target,
-            (from_time, to_time),
+            FromTo {
+                from: from_time,
+                to: to_time,
+            },
             EicOptions {
                 ppm_tolerance,
                 mz_tolerance,
@@ -598,7 +601,11 @@ fn build_find_peaks_options(options: *const CPeakPOptions) -> FindPeaksOptions {
     let noise = (o.noise.is_finite() && o.noise > 0.0).then_some(o.noise);
     let auto_noise = Some(o.auto_noise != 0);
     let allow_overlap = Some(o.allow_overlap != 0);
-    let sn_ratio: Option<usize> = (o.sn_ratio > 0).then_some(o.sn_ratio as usize);
+    let sn_ratio = if o.sn_ratio.is_finite() && o.sn_ratio > 0.0 {
+        Some(o.sn_ratio)
+    } else {
+        Some(1.5) // DEefault value for s/n 
+    };
     let filter = FilterPeaksOptions {
         integral_threshold: integral,
         intensity_threshold: intensity,

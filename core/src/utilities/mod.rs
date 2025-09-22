@@ -11,7 +11,9 @@ pub mod scan_for_peaks;
 pub mod sgg;
 pub mod structs;
 pub use kmeans::{Point, kmeans};
+pub mod calculate_eic;
 pub mod utilities;
+pub use calculate_eic::{Eic, EicOptions, calculate_eic_from_bin1, calculate_eic_from_mzml};
 pub use utilities::{
     closest_index, mean_step, min_positive_step, min_sep, odd_in_range, quad_peak,
 };

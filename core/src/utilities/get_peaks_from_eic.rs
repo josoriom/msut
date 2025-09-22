@@ -1,36 +1,32 @@
 use rayon::{ThreadPoolBuilder, prelude::*};
 
 use crate::utilities::{
+    EicOptions, calculate_eic_from_mzml,
     find_peaks::FindPeaksOptions,
     get_peak::get_peak,
-    parse::{
-        calculate_eic::{EicOptions, calculate_eic_from_mzml},
-        decode,
-        parse_mzml::MzML,
-    },
+    parse::{decode, parse_mzml::MzML},
     structs::{DataXY, EicRoi, FromTo, Peak, Roi},
 };
 
 pub fn get_peaks_from_eic(
     bytes: &[u8],
     from_to: FromTo,
-    items: &[EicRoi],
+    rois: &[EicRoi],
     options: Option<FindPeaksOptions>,
     cores: usize,
 ) -> Option<Vec<(String, f64, f64, Peak)>> {
     let mzml = decode(bytes).ok()?;
-    if cores <= 1 || items.len() < 2 {
-        let mut out = Vec::with_capacity(items.len());
-        for it in items {
-            out.push(compute_one(&mzml, from_to, it, &options));
+    if cores <= 1 || rois.len() < 2 {
+        let mut out: Vec<(String, f64, f64, Peak)> = Vec::with_capacity(rois.len());
+        for roi in rois {
+            out.push(compute_one(&mzml, from_to, roi, &options));
         }
         return Some(out);
     }
     let pool = ThreadPoolBuilder::new().num_threads(cores).build().ok()?;
     Some(pool.install(|| {
-        items
-            .par_iter()
-            .map(|it| compute_one(&mzml, from_to, it, &options))
+        rois.par_iter()
+            .map(|roi| compute_one(&mzml, from_to, roi, &options))
             .collect()
     }))
 }
@@ -42,14 +38,11 @@ fn compute_one(
     roi: &EicRoi,
     options: &Option<FindPeaksOptions>,
 ) -> (String, f64, f64, Peak) {
-    let l = roi.rt - from_to.from;
-    let r = roi.rt + from_to.to;
-    let (rt_lo, rt_hi) = if l <= r { (l, r) } else { (r, l) };
     let mz_str = roi.mz.to_string();
     let eic = match calculate_eic_from_mzml(
         mzml,
         &mz_str,
-        (rt_lo, rt_hi),
+        from_to,
         EicOptions {
             ppm_tolerance: 20.0,
             mz_tolerance: 0.005,

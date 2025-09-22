@@ -103,7 +103,7 @@ export type ChromPeak = {
 
 export function packPeakOptions(opts?: PeakOptions): Buffer | undefined {
   if (!opts) return undefined;
-  const b = Buffer.alloc(48);
+  const b = Buffer.alloc(56);
   const f64 = (v: unknown, off: number) =>
     b.writeDoubleLE(Number.isFinite(v as number) ? Number(v) : NaN, off);
   const i32 = (v: unknown, off: number) =>
@@ -124,7 +124,7 @@ export function packPeakOptions(opts?: PeakOptions): Buffer | undefined {
   i32(opts.autoNoise, 32);
   i32(opts.allowOverlap, 36);
   i32(opts.windowSize, 40);
-  i32(opts.snRatio, 44);
+  f64(opts.snRatio, 48);
   return b;
 }
 

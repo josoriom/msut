@@ -13,4 +13,3 @@ Cargo.lock
 **/target-windows-amd64
 **/target-windows-arm64
 **/.vscode
-core/tests/examples.rs
