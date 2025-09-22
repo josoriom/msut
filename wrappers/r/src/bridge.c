@@ -37,7 +37,7 @@ typedef struct
   int32_t auto_noise;
   int32_t allow_overlap;
   int32_t window_size;
-  int32_t sn_ratio;
+  double sn_ratio;
 } CPeakPOptions;
 
 typedef int32_t (*fn_parse_mzml)(const unsigned char *, size_t, Buf *);
@@ -193,7 +193,7 @@ static int fill_options(SEXP opts, CPeakPOptions *out)
   out->auto_noise = 0;
   out->allow_overlap = 0;
   out->window_size = 0;
-  out->sn_ratio = 0;
+  out->sn_ratio = NAN;
   SEXP v = R_NilValue;
   v = list_get(opts, "integral_threshold");
   if (v != R_NilValue)
@@ -218,7 +218,7 @@ static int fill_options(SEXP opts, CPeakPOptions *out)
     out->window_size = (int32_t)asInteger(v);
   v = list_get(opts, "sn_ratio");
   if (v != R_NilValue)
-    out->sn_ratio = (int32_t)asInteger(v);
+    out->sn_ratio = asReal(v);
   return 1;
 }
 
@@ -229,9 +229,9 @@ static int as_opts_ptr(SEXP options, CPeakPOptions *copy, const CPeakPOptions **
     return 0;
   if (TYPEOF(options) == RAWSXP)
   {
-    if ((size_t)XLENGTH(options) != 48)
-      error("msut: options raw blob must be length 48");
-    memcpy((void *)copy, (const void *)RAW(options), 48);
+    if ((size_t)XLENGTH(options) != sizeof(CPeakPOptions))
+      error("msut: options raw blob must be length %zu", sizeof(CPeakPOptions));
+    memcpy((void *)copy, (const void *)RAW(options), sizeof(CPeakPOptions));
     *out_ptr = copy;
     return 1;
   }

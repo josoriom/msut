@@ -39,7 +39,7 @@
   w(if (lgc("auto_noise",   FALSE)) 1L else 0L, 32, "int")
   w(if (lgc("allow_overlap",FALSE)) 1L else 0L, 36, "int")
   w(int("window_size",         0L),  40, "int")
-  w(int("sn_ratio",            0L),  44, "int")
+  w(int("sn_ratio",            0L),  48, "double")
 
   rawConnectionValue(con)
 }
@@ -128,7 +128,7 @@ bin_to_df <- function(bin) {
 get_peak <- function(
   x, y, rt, range,
   integral_threshold=NaN, intensity_threshold=NaN, width_threshold=0L,
-  noise=NaN, auto_noise=FALSE, allow_overlap=FALSE, window_size=0L, sn_ratio=0L
+  noise=NaN, auto_noise=FALSE, allow_overlap=FALSE, window_size=0L, sn_ratio=NaN
 ) {
   stopifnot(is.numeric(x), is.numeric(y))
   if (length(x) != length(y) || length(x) < 3) stop("x and y must have the same length (>= 3)")
@@ -165,7 +165,7 @@ get_peak <- function(
 get_peaks_from_eic <- function(
   bin, df, from_left=0.5, to_right=0.5, cores=1L,
   integral_threshold=NaN, intensity_threshold=NaN, width_threshold=0L,
-  noise=NaN, auto_noise=FALSE, allow_overlap=FALSE, window_size=0L, sn_ratio=0L
+  noise=NaN, auto_noise=FALSE, allow_overlap=FALSE, window_size=0L, sn_ratio=NaN
 ) {
   stopifnot(is.raw(bin))
   if (!is.data.frame(df)) stop("`df` must be a data.frame")
