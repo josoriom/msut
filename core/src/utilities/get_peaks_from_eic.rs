@@ -1,13 +1,10 @@
 use rayon::{ThreadPoolBuilder, prelude::*};
 
 use crate::utilities::{
+    EicOptions, calculate_eic_from_mzml,
     find_peaks::FindPeaksOptions,
     get_peak::get_peak,
-    parse::{
-        calculate_eic::{EicOptions, calculate_eic_from_mzml},
-        decode,
-        parse_mzml::MzML,
-    },
+    parse::{decode, parse_mzml::MzML},
     structs::{DataXY, EicRoi, FromTo, Peak, Roi},
 };
 

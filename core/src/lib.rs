@@ -6,8 +6,8 @@ use std::{
 };
 
 pub mod utilities;
-use utilities::parse::calculate_eic::{EicOptions, calculate_eic_from_bin1};
 use utilities::{
+    calculate_eic::{EicOptions, calculate_eic_from_bin1},
     find_noise_level::find_noise_level as find_noise_level_rs,
     find_peaks::{FilterPeaksOptions, FindPeaksOptions, find_peaks as find_peaks_rs},
     get_boundaries::BoundariesOptions,
