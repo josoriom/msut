@@ -15,7 +15,7 @@ pub struct FilterPeaksOptions {
     pub noise: Option<f64>,
     pub auto_noise: Option<bool>,
     pub allow_overlap: Option<bool>,
-    pub sn_ratio: Option<usize>,
+    pub sn_ratio: Option<f64>,
 }
 impl Default for FilterPeaksOptions {
     fn default() -> Self {
@@ -26,7 +26,7 @@ impl Default for FilterPeaksOptions {
             noise: None,
             auto_noise: Some(false),
             allow_overlap: Some(false),
-            sn_ratio: Some(1),
+            sn_ratio: Some(1.5),
         }
     }
 }
@@ -162,7 +162,7 @@ pub fn find_peaks(data: &DataXY, options: Option<FindPeaksOptions>) -> Vec<Peak>
     if !peaks.is_empty() {
         let mut cutoff = 0.0_f64;
         if resolved_noise > 0.0 {
-            let sn_mult = filter_opts.sn_ratio.unwrap_or(1) as f64;
+            let sn_mult = filter_opts.sn_ratio.unwrap_or(1.0) as f64;
             cutoff = sn_mult * resolved_noise;
         }
         if let Some(user_int) = filter_opts.intensity_threshold {

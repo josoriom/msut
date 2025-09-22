@@ -16,7 +16,7 @@ where
     let params = ClusterParams {
         log_n: true,
         log_i: true,
-        w_n: 2.0,
+        w_n: 3.0,
         w_i: 1.0,
     };
     let labels = cluster_intensities(&points, params);

@@ -214,7 +214,7 @@ fn noise_defined_keeps_just_above_threshold() {
         filter_peaks_options: Some(FilterPeaksOptions {
             integral_threshold: None,
             width_threshold: None,
-            noise: Some(0.06),
+            noise: Some(0.04),
             auto_noise: Some(false),
             allow_overlap: Some(true),
             ..Default::default()
