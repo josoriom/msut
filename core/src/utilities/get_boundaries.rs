@@ -104,11 +104,13 @@ fn walk(
     let min_stop = global_min + epsilon;
 
     let mut baseline_count: usize = 0;
-    let mut is_tail = false;
-    let mut is_checking = false;
-    let mut check_steps: usize = 0;
-    let mut check_start_idx: Option<usize> = None;
-    let mut check_start_val: f64 = 0.0;
+
+    let mut tail_started = false;
+    let mut checking = false;
+    let mut steps_up: usize = 0;
+
+    let mut local_min_idx: isize = start as isize;
+    let mut local_min_val: f64 = y[start] as f64;
 
     while current >= 0 && current < n - 1 {
         let next = current + if direction > 0 { 1 } else { -1 };
@@ -134,40 +136,41 @@ fn walk(
         };
         let dy = (y[j] as f64) - (y[i] as f64);
         let slope_dir = (dy / denom) * if direction > 0 { 1.0 } else { -1.0 };
-        let is_neg = slope_dir < 0.0;
+        let is_desc = slope_dir < 0.0;
+        let is_asc_or_flat = !is_desc;
 
-        if !is_tail && is_neg {
-            is_tail = true;
+        if is_desc {
+            tail_started = true;
         }
 
-        if is_tail {
-            if !is_checking {
-                if !is_neg {
-                    is_checking = true;
-                    check_steps = 1;
-                    check_start_idx = Some(i);
-                    check_start_val = y[i] as f64;
+        if tail_started {
+            if (y[j] as f64) < local_min_val {
+                local_min_val = y[j] as f64;
+                local_min_idx = next;
+            }
+
+            if !checking {
+                if is_asc_or_flat {
+                    checking = true;
+                    steps_up = 1;
                 }
             } else {
-                if is_neg {
-                    is_checking = false;
-                    check_steps = 0;
-                    check_start_idx = None;
+                if is_desc {
+                    checking = false;
+                    steps_up = 0;
                 } else {
-                    check_steps += 1;
-                    if check_steps >= n_steps {
-                        if let Some(cs) = check_start_idx {
-                            let rise = ((y[j] as f64) - check_start_val).max(0.0);
-                            if rise >= noise {
-                                return Boundary {
-                                    index: Some(cs),
-                                    value: Some(x[cs]),
-                                };
-                            } else {
-                                is_checking = false;
-                                check_steps = 0;
-                                check_start_idx = None;
-                            }
+                    steps_up += 1;
+                    if steps_up >= n_steps {
+                        let rise = (y[j] as f64) - local_min_val;
+                        if rise >= noise {
+                            let k = local_min_idx.clamp(0, n - 1) as usize;
+                            return Boundary {
+                                index: Some(k),
+                                value: Some(x[k]),
+                            };
+                        } else {
+                            checking = false;
+                            steps_up = 0;
                         }
                     }
                 }
@@ -182,10 +185,10 @@ fn walk(
                 } else {
                     current + (baseline_run as isize - 1)
                 };
-                let clamped = first.clamp(0, n - 1) as usize;
+                let k = first.clamp(0, n - 1) as usize;
                 return Boundary {
-                    index: Some(clamped),
-                    value: Some(x[clamped]),
+                    index: Some(k),
+                    value: Some(x[k]),
                 };
             }
         } else {
