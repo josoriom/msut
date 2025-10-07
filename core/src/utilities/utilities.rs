@@ -78,7 +78,7 @@ pub fn min_sep(xs: &[f64], window_size: usize) -> f64 {
 }
 
 #[inline]
-pub fn quad_peak(xs: &[f64], ys: &[f32], i: usize) -> f64 {
+pub fn quad_peak(xs: &[f64], ys: &[f64], i: usize) -> f64 {
     debug_assert!(i > 0 && i + 1 < xs.len());
     let xm1 = xs[i - 1];
     let x0 = xs[i];
