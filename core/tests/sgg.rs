@@ -31,10 +31,10 @@ fn simple_triangle_check_symmetry_with_x_array() {
         xs.push(i as f64);
     }
 
-    let mut ys = vec![0.0f32; 101];
+    let mut ys = vec![0.0f64; 101];
     let last = ys.len() - 1;
     for i in 0..=50 {
-        let v = i as f32;
+        let v = i as f64;
         ys[i] = v;
         ys[last - i] = v;
     }
@@ -72,11 +72,11 @@ fn smoothing_test() {
         xs.push(i as f64 * dx);
     }
 
-    let mut data = vec![0.0f32; n];
+    let mut data = vec![0.0f64; n];
     for i in 0..n {
         let angle = i as f64 * dx;
         let v = angle.sin() + jitter(i as u32) * noise;
-        data[i] = v as f32;
+        data[i] = v as f64;
     }
 
     let out = sgg(&data, &xs, opts);
@@ -106,11 +106,11 @@ fn first_derivative_test() {
         xs.push(i as f64 * dx);
     }
 
-    let mut data = vec![0.0f32; n];
+    let mut data = vec![0.0f64; n];
     for i in 0..n {
         let angle = i as f64 * dx;
         let v = angle.sin() + jitter(i as u32) * noise;
-        data[i] = v as f32;
+        data[i] = v as f64;
     }
 
     let out = sgg(&data, &xs, opts);
@@ -142,7 +142,7 @@ fn first_derivative_x_as_vector_equivalence() {
 
     let mut data = Vec::with_capacity(n);
     for i in 0..n {
-        data.push((i as f64 * dx).sin() as f32);
+        data.push((i as f64 * dx).sin() as f64);
     }
 
     let a = sgg(&data, &xs, opts);
@@ -172,7 +172,7 @@ fn border_test() {
     let mut data = Vec::with_capacity(n);
     for i in 0..n {
         let x = i as f64;
-        data.push((x * x * x - 4.0 * x * x + 5.0 * x) as f32);
+        data.push((x * x * x - 4.0 * x * x + 5.0 * x) as f64);
     }
 
     let out = sgg(&data, &xs, opts);

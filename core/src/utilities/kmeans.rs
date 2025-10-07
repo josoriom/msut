@@ -1,73 +1,81 @@
 pub type Point = Vec<f64>;
 
-fn dist(a: &Point, b: &Point) -> f64 {
-    let mut s = 0.0;
-    for i in 0..a.len() {
-        let d = a[i] - b[i];
-        s += d * d;
-    }
-    s.sqrt()
-}
-
-fn mean(ps: &[&Point]) -> Point {
-    let d = ps[0].len();
-    let mut m = vec![0.0; d];
-    for p in ps {
-        for i in 0..d {
-            m[i] += p[i];
-        }
-    }
-    let n = ps.len() as f64;
-    for i in 0..d {
-        m[i] /= n;
-    }
-    m
-}
+/// K-means clustering (Lloyd’s algorithm).
+/// Pseudocode reference: Wikipedia — “K-means clustering”
+/// <https://en.wikipedia.org/wiki/K-means_clustering>
 
 pub fn kmeans(points: &[Point], mut centroids: Vec<Point>) -> Vec<Point> {
     if points.is_empty() || centroids.is_empty() {
         return Vec::new();
     }
+
     let k = centroids.len();
     let mut converged = false;
-    let mut it = 0usize;
+    let mut iter = 0usize;
 
     while !converged {
-        let mut groups: Vec<Vec<usize>> = vec![Vec::new(); k];
+        let mut clusters: Vec<Vec<usize>> = vec![Vec::new(); k];
 
-        for i in 0..points.len() {
-            let p = &points[i];
-            let mut idx = 0usize;
-            let mut best = dist(p, &centroids[0]);
+        for (i, point) in points.iter().enumerate() {
+            let mut closest_index = 0usize;
+            let mut min_distance = distance(point, &centroids[0]);
+
             for j in 1..k {
-                let d = dist(p, &centroids[j]);
-                if d < best {
-                    best = d;
-                    idx = j;
+                let d = distance(point, &centroids[j]);
+                if d < min_distance {
+                    min_distance = d;
+                    closest_index = j;
                 }
             }
-            groups[idx].push(i);
+            clusters[closest_index].push(i);
         }
 
-        let mut next = Vec::with_capacity(k);
-        for gi in 0..k {
-            if groups[gi].is_empty() {
-                next.push(centroids[gi].clone());
+        let mut new_centroids: Vec<Point> = Vec::with_capacity(k);
+        for i in 0..k {
+            if clusters[i].is_empty() {
+                new_centroids.push(centroids[i].clone());
             } else {
-                let mut refs: Vec<&Point> = Vec::with_capacity(groups[gi].len());
-                for &ix in &groups[gi] {
-                    refs.push(&points[ix]);
+                let mut cluster_points: Vec<&Point> = Vec::with_capacity(clusters[i].len());
+                for &ix in &clusters[i] {
+                    cluster_points.push(&points[ix]);
                 }
-                next.push(mean(&refs));
+                new_centroids.push(calculate_centroid(&cluster_points));
             }
         }
 
-        converged = next == centroids;
-        centroids = next;
-        it += 1;
-        if it > 300 {
+        converged = new_centroids == centroids;
+        centroids = new_centroids;
+
+        iter += 1;
+        if iter > 300 {
             break;
         }
     }
+
     centroids
+}
+
+pub fn calculate_centroid(points_in_cluster: &[&Point]) -> Point {
+    let d = points_in_cluster[0].len();
+    let mut centroid = vec![0.0; d];
+
+    for p in points_in_cluster {
+        for i in 0..d {
+            centroid[i] += p[i];
+        }
+    }
+    let n = points_in_cluster.len() as f64;
+    for i in 0..d {
+        centroid[i] /= n;
+    }
+    centroid
+}
+
+pub fn distance(a: &Point, b: &Point) -> f64 {
+    let mut sum = 0.0;
+    for i in 0..a.len() {
+        let d = a[i] - b[i];
+        sum += d * d;
+    }
+    sum.sqrt()
 }
