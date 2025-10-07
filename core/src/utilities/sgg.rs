@@ -1,3 +1,13 @@
+//! Savitzky–Golay (Generalized) — smoothing & derivatives (SGG)
+//!
+//! Rust implementation of JavaScript version from:
+//! https://github.com/mljs/savitzky-golay-generalized
+//!
+//! # References
+//! * Peter A. Gorry, (1990).
+//! “General Least-Squares Smoothing and Differentiation by the Convolution (Savitzky–Golay) Method.”
+//! * MLJS `savitzky-golay-generalized` repository.
+
 #[derive(Clone, Copy, Debug)]
 pub struct SggOptions {
     pub window_size: usize,
@@ -15,7 +25,7 @@ impl Default for SggOptions {
     }
 }
 
-pub fn sgg(ys: &[f32], xs: &[f64], opts: SggOptions) -> Vec<f32> {
+pub fn sgg(ys: &[f64], xs: &[f64], opts: SggOptions) -> Vec<f64> {
     let window_size = opts.window_size;
     let derivative = opts.derivative;
     let polynomial = opts.polynomial;
@@ -46,178 +56,135 @@ pub fn sgg(ys: &[f32], xs: &[f64], opts: SggOptions) -> Vec<f32> {
     }
 
     let half = window_size / 2;
-    let n = ys.len();
-
-    let mut y64 = vec![0.0f64; n];
-    for i in 0..n {
-        y64[i] = ys[i] as f64;
-    }
-
-    let hs = get_hs(xs, half, derivative);
+    let np = ys.len();
+    let mut ans = vec![0.0f64; np];
     let weights = full_weights(window_size, polynomial, derivative);
 
-    let mut ans = vec![0.0f32; n];
-
-    for i in 0..half {
-        let wl = &weights[half - i - 1];
-        let wr = &weights[half + i + 1];
-
-        let mut dl = 0.0f64;
-        let mut dr = 0.0f64;
-
-        for l in 0..window_size {
-            dl += wl[l] * y64[l];
-            dr += wr[l] * y64[n - window_size + l];
-        }
-
-        let idx_l = half - i - 1;
-        let idx_r = n - half + i;
-
-        ans[idx_l] = (dl / hs[idx_l]) as f32;
-        ans[idx_r] = (dr / hs[idx_r]) as f32;
+    let constant_h = xs.len() == 1;
+    let mut hs_val = 1.0f64;
+    if constant_h {
+        hs_val = xs[0].powi(derivative as i32);
     }
 
-    let wc = &weights[half];
-    for i in window_size..=n {
+    for i in 0..half {
+        let wg1 = &weights[half - i - 1];
+        let wg2 = &weights[half + i + 1];
+        let mut d1 = 0.0f64;
+        let mut d2 = 0.0f64;
+        for l in 0..window_size {
+            d1 += wg1[l] * ys[l];
+            d2 += wg2[l] * ys[np - window_size + l];
+        }
+        if constant_h {
+            ans[half - i - 1] = d1 / hs_val;
+            ans[np - half + i] = d2 / hs_val;
+        } else {
+            let hs_left = get_hs(xs, half - i - 1, half, derivative);
+            ans[half - i - 1] = d1 / hs_left;
+            let hs_right = get_hs(xs, np - half + i, half, derivative);
+            ans[np - half + i] = d2 / hs_right;
+        }
+    }
+
+    let wg = &weights[half];
+    for i in window_size..=np {
         let mut d = 0.0f64;
         for l in 0..window_size {
-            d += wc[l] * y64[l + i - window_size];
+            d += wg[l] * ys[l + i - window_size];
         }
-        let idx = i - half - 1;
-        ans[idx] = (d / hs[idx]) as f32;
+        let denom = if constant_h {
+            hs_val
+        } else {
+            get_hs(xs, i - half - 1, half, derivative)
+        };
+        ans[i - half - 1] = d / denom;
     }
 
     ans
 }
 
-fn get_hs(xs: &[f64], half: usize, derivative: usize) -> Vec<f64> {
-    let n = xs.len();
-    if derivative == 0 || n < 2 {
-        let v = vec![1.0f64; n];
-        return v;
+fn get_hs(h: &[f64], center: usize, half: usize, derivative: usize) -> f64 {
+    if derivative == 0 {
+        return 1.0;
     }
-
-    let mut pref = vec![0.0f64; n];
-    for i in 0..(n - 1) {
-        pref[i + 1] = pref[i] + (xs[i + 1] - xs[i]);
+    let mut hs = 0.0f64;
+    let mut count = 0usize;
+    let start = center as isize - half as isize;
+    let end = center as isize + half as isize;
+    let last = h.len().saturating_sub(1) as isize;
+    let mut i = start;
+    while i < end {
+        if i >= 0 && i < last {
+            let iu = i as usize;
+            hs += h[iu + 1] - h[iu];
+            count += 1;
+        }
+        i += 1;
     }
-
-    let mut hs = vec![1.0f64; n];
-    for c in 0..n {
-        let start = if c >= half { c - half } else { 0 };
-        let end_excl = {
-            let e = c + half;
-            if e < n - 1 { e } else { n - 1 }
-        };
-        let count = if end_excl > start {
-            end_excl - start
-        } else {
-            0
-        };
-        let avg = if count > 0 {
-            (pref[end_excl] - pref[start]) / (count as f64)
-        } else {
-            1.0
-        };
-        hs[c] = avg.powi(derivative as i32);
+    if count == 0 {
+        1.0
+    } else {
+        (hs / count as f64).powi(derivative as i32)
     }
-    hs
 }
 
-fn full_weights(m: usize, n: usize, s: usize) -> Vec<Vec<f64>> {
-    let half = (m / 2) as i32;
-    let n_i = n as i32;
-    let s_i = s as i32;
-
-    let mut gi: Vec<Vec<f64>> = Vec::with_capacity(m);
-    for idx in 0..m {
-        let i_off = idx as i32 - half;
-        let tbl = gram_table(i_off, half, n_i, 0);
-        let mut row = vec![0.0f64; (n_i as usize) + 1];
-        for k in 0..=n_i as usize {
-            row[k] = tbl[k][0];
-        }
-        gi.push(row);
+fn gram_poly(i: i32, m: i32, k: i32, s: i32) -> f64 {
+    if k > 0 {
+        let den = (k * (2 * m - k + 1)) as f64;
+        let a = (4 * k - 2) as f64 / den;
+        let b = ((k - 1) * (2 * m + k)) as f64 / den;
+        a * (i as f64 * gram_poly(i, m, k - 1, s) + s as f64 * gram_poly(i, m, k - 1, s - 1))
+            - b * gram_poly(i, m, k - 2, s)
+    } else if k == 0 && s == 0 {
+        1.0
+    } else {
+        0.0
     }
-
-    let mut gt: Vec<Vec<f64>> = Vec::with_capacity(m);
-    for idx in 0..m {
-        let t_off = idx as i32 - half;
-        let tbl = gram_table(t_off, half, n_i, s_i);
-        let mut row = vec![0.0f64; (n_i as usize) + 1];
-        for k in 0..=n_i as usize {
-            row[k] = tbl[k][s_i as usize];
-        }
-        gt.push(row);
-    }
-
-    let two_m = 2 * half;
-    let mut coef = vec![0.0f64; (n_i as usize) + 1];
-    for k in 0..=n_i {
-        let num = gen_fact(two_m, k);
-        let den = gen_fact(two_m + k + 1, k + 1);
-        coef[k as usize] = (2 * k + 1) as f64 * (num / den);
-    }
-
-    let mut w = vec![vec![0.0f64; m]; m];
-    for t_idx in 0..m {
-        for j_idx in 0..m {
-            let mut sum = 0.0f64;
-            for k in 0..=n_i as usize {
-                sum += coef[k] * gi[j_idx][k] * gt[t_idx][k];
-            }
-            w[t_idx][j_idx] = sum;
-        }
-    }
-    w
-}
-
-fn gram_table(i: i32, m: i32, n_max: i32, s_max: i32) -> Vec<Vec<f64>> {
-    let nm = (n_max as usize) + 1;
-    let sm = (s_max as usize) + 1;
-    let mut g = vec![vec![0.0f64; sm]; nm];
-    g[0][0] = 1.0;
-
-    let mut k = 1;
-    while k <= n_max {
-        let kf = k as f64;
-        let denom = kf * (2 * m - k + 1) as f64;
-        let a = (4 * k - 2) as f64 / denom;
-        let b = ((k - 1) as f64 * (2 * m + k) as f64) / denom;
-
-        let mut s = 0;
-        while s <= s_max {
-            let s_usize = s as usize;
-            let term1 = (i as f64) * g[(k - 1) as usize][s_usize];
-            let term2 = if s > 0 {
-                (s as f64) * g[(k - 1) as usize][(s - 1) as usize]
-            } else {
-                0.0
-            };
-            let term3 = if k >= 2 {
-                g[(k - 2) as usize][s_usize]
-            } else {
-                0.0
-            };
-            g[k as usize][s_usize] = a * (term1 + term2) - b * term3;
-            s += 1;
-        }
-        k += 1;
-    }
-    g
 }
 
 fn gen_fact(a: i32, b: i32) -> f64 {
     if a >= b {
+        let mut gf = 1.0f64;
         let start = a - b + 1;
-        let mut acc = 1.0f64;
         let mut j = start;
         while j <= a {
-            acc *= j as f64;
+            gf *= j as f64;
             j += 1;
         }
-        acc
+        gf
     } else {
         1.0
     }
+}
+
+fn weight(i: i32, t: i32, m: i32, n: i32, s: i32) -> f64 {
+    let mut sum = 0.0f64;
+    let mut k = 0;
+    while k <= n {
+        sum += (2 * k + 1) as f64
+            * (gen_fact(2 * m, k) / gen_fact(2 * m + k + 1, k + 1))
+            * gram_poly(i, m, k, 0)
+            * gram_poly(t, m, k, s);
+        k += 1;
+    }
+    sum
+}
+
+fn full_weights(m: usize, n: usize, s: usize) -> Vec<Vec<f64>> {
+    let np = (m / 2) as i32;
+    let n_i = n as i32;
+    let s_i = s as i32;
+    let mut weights = vec![vec![0.0f64; m]; m];
+    let mut t = -np;
+    while t <= np {
+        let row = (t + np) as usize;
+        let mut j = -np;
+        while j <= np {
+            let col = (j + np) as usize;
+            weights[row][col] = weight(j, t, np, n_i, s_i);
+            j += 1;
+        }
+        t += 1;
+    }
+    weights
 }
