@@ -23,7 +23,10 @@ use utilities::{
     structs::{DataXY, FromTo, Roi},
 };
 
-use crate::utilities::structs::{ChromRoi, EicRoi};
+use crate::utilities::{
+    calculate_baseline::{BaselineOptions, calculate_baseline as calculate_baseline_rs},
+    structs::{ChromRoi, EicRoi},
+};
 
 const OK: c_int = 0;
 const ERR_INVALID_ARGS: c_int = 1;
@@ -45,6 +48,9 @@ pub struct CPeakPOptions {
     pub width_threshold: c_int,
     pub noise: f64,
     pub auto_noise: c_int,
+    pub auto_baseline: c_int,
+    pub baseline_window: c_int,
+    pub baseline_window_factor: c_int,
     pub allow_overlap: c_int,
     pub window_size: c_int,
     pub sn_ratio: f64,
@@ -81,9 +87,10 @@ pub unsafe extern "C" fn alloc(size: usize) -> *mut u8 {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn free_(ptr_raw: *mut u8, size: usize) {
+pub unsafe extern "C" fn free_(ptr_raw: *mut u8, len: usize) {
     if !ptr_raw.is_null() {
-        let _ = unsafe { Vec::<u8>::from_raw_parts(ptr_raw, size, size) };
+        let slice = unsafe { core::slice::from_raw_parts_mut(ptr_raw, len) };
+        drop(unsafe { Box::<[u8]>::from_raw(slice) });
     }
 }
 
@@ -531,6 +538,45 @@ pub unsafe extern "C" fn calculate_eic(
     }
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn calculate_baseline(
+    y_ptr: *const f64,
+    len: usize,
+    baseline_window: c_int,
+    baseline_window_factor: c_int,
+    out_baseline: *mut Buf,
+) -> c_int {
+    if y_ptr.is_null() || out_baseline.is_null() {
+        return ERR_INVALID_ARGS;
+    }
+    let res = catch_unwind(AssertUnwindSafe(|| -> Result<(), c_int> {
+        let ys = unsafe { slice::from_raw_parts(y_ptr, len) };
+        let def = BaselineOptions::default();
+        let opts = BaselineOptions {
+            baseline_window: if baseline_window > 0 {
+                Some(baseline_window as f64)
+            } else {
+                def.baseline_window
+            },
+            baseline_window_factor: if baseline_window_factor > 0 {
+                Some(baseline_window_factor as usize)
+            } else {
+                def.baseline_window_factor
+            },
+            level: Some(1),
+        };
+        let base = calculate_baseline_rs(ys, opts);
+        let bytes = f64_slice_to_u8_box(&base);
+        write_buf(out_baseline, bytes);
+        Ok(())
+    }));
+    match res {
+        Ok(Ok(())) => OK,
+        Ok(Err(code)) => code,
+        Err(_) => ERR_PANIC,
+    }
+}
+
 fn f64_slice_to_u8_box(v: &[f64]) -> Box<[u8]> {
     let n = v.len() * 8;
     let mut out = Vec::<u8>::with_capacity(n);
@@ -584,27 +630,37 @@ fn build_find_peaks_options(options: *const CPeakPOptions) -> FindPeaksOptions {
             scan_peaks_options: Some(ScanPeaksOptions {
                 epsilon: EPS,
                 window_size: ws,
+                ..Default::default()
             }),
             get_boundaries_options: Some(BoundariesOptions {
                 ..Default::default()
             }),
-            filter_peaks_options: None,
+            filter_peaks_options: Some(FilterPeaksOptions {
+                ..Default::default()
+            }),
+            baseline_options: Some(BaselineOptions {
+                ..Default::default()
+            }),
         };
     }
-    let o = unsafe { *options };
-    let ws = odd_at_least(pos_usize(o.window_size, 17), 5, 17);
-    let integral = (o.integral_threshold.is_finite() && o.integral_threshold >= 0.0)
-        .then_some(o.integral_threshold);
-    let intensity = (o.intensity_threshold.is_finite() && o.intensity_threshold >= 0.0)
-        .then_some(o.intensity_threshold);
-    let width = (o.width_threshold > 0).then_some(o.width_threshold as usize);
-    let noise = (o.noise.is_finite() && o.noise > 0.0).then_some(o.noise);
-    let auto_noise = Some(o.auto_noise != 0);
-    let allow_overlap = Some(o.allow_overlap != 0);
-    let sn_ratio = if o.sn_ratio.is_finite() && o.sn_ratio > 0.0 {
-        Some(o.sn_ratio)
+    let options = unsafe { *options };
+    let ws = odd_at_least(pos_usize(options.window_size, 17), 5, 17);
+    let integral = (options.integral_threshold.is_finite() && options.integral_threshold >= 0.0)
+        .then_some(options.integral_threshold);
+    let intensity = (options.intensity_threshold.is_finite() && options.intensity_threshold >= 0.0)
+        .then_some(options.intensity_threshold);
+    let width = (options.width_threshold > 0).then_some(options.width_threshold as usize);
+    let noise = (options.noise.is_finite() && options.noise > 0.0).then_some(options.noise);
+    let auto_noise = Some(options.auto_noise != 0);
+    let auto_baseline = Some(options.auto_baseline != 0);
+    let baseline_window = (options.baseline_window > 0).then_some(options.baseline_window as f64);
+    let baseline_window_factor =
+        (options.baseline_window_factor > 0).then_some(options.baseline_window_factor as usize);
+    let allow_overlap = Some(options.allow_overlap != 0);
+    let sn_ratio = if options.sn_ratio.is_finite() && options.sn_ratio > 0.0 {
+        Some(options.sn_ratio)
     } else {
-        Some(1.5) // DEefault value for s/n 
+        Some(1.5)
     };
     let filter = FilterPeaksOptions {
         integral_threshold: integral,
@@ -612,17 +668,25 @@ fn build_find_peaks_options(options: *const CPeakPOptions) -> FindPeaksOptions {
         width_threshold: width,
         noise,
         auto_noise,
+        auto_baseline,
         allow_overlap,
         sn_ratio,
+        ..Default::default()
     };
     FindPeaksOptions {
         scan_peaks_options: Some(ScanPeaksOptions {
             epsilon: EPS,
             window_size: ws,
+            ..Default::default()
         }),
         get_boundaries_options: Some(BoundariesOptions {
             ..Default::default()
         }),
         filter_peaks_options: Some(filter),
+        baseline_options: Some(BaselineOptions {
+            baseline_window,
+            baseline_window_factor,
+            level: Some(1),
+        }),
     }
 }

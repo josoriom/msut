@@ -78,7 +78,7 @@ pub fn min_sep(xs: &[f64], window_size: usize) -> f64 {
 }
 
 #[inline]
-pub fn quad_peak(xs: &[f64], ys: &[f32], i: usize) -> f64 {
+pub fn quad_peak(xs: &[f64], ys: &[f64], i: usize) -> f64 {
     debug_assert!(i > 0 && i + 1 < xs.len());
     let xm1 = xs[i - 1];
     let x0 = xs[i];
@@ -124,4 +124,40 @@ pub fn xy_integration(x: &[f64], y: &[f32]) -> (f64, f64) {
         }
     }
     (s, m as f64)
+}
+
+#[inline]
+/// ## Error function
+///  https://en.wikipedia.org/wiki/Error_function
+/// erfc(x) Approximation with max error of 1.2e-7.
+/// ### Function
+/// - `t = 1 / (1 + 0.5 * |x|)`
+/// - `τ = t * exp( -x^2 - 1.26551223 + t * P(t) )`
+/// - `P(t) = c_1 + c_2 t + c_3 * t^2 + … + c_9 * t8`,
+/// ## Coefficients:
+/// `c = [1.00002368, 0.37409196, 0.09678418, -0.18628806, 0.27886807,
+///      -1.13520398, 1.48851587, -0.82215223, 0.17087277]`.
+pub fn erfc_approx(x: f64) -> f64 {
+    const A: [f64; 9] = [
+        1.000_023_68,
+        0.374_091_96,
+        0.096_784_18,
+        -0.186_288_06,
+        0.278_868_07,
+        -1.135_203_98,
+        1.488_515_87,
+        -0.822_152_23,
+        0.170_872_77,
+    ];
+    let z = x.abs();
+    if z > 26.0 {
+        return if x.is_sign_positive() { 0.0 } else { 2.0 };
+    }
+    let t = 1.0 / (1.0 + 0.5 * z);
+    let mut poly = 0.0;
+    for &a in A.iter().rev() {
+        poly = poly * t + a;
+    }
+    let ans = t * (-z * z - 1.265_512_23 + t * poly).exp();
+    if x >= 0.0 { ans } else { 2.0 - ans }
 }

@@ -21,9 +21,17 @@ where
     };
     let labels = cluster_intensities(&points, params);
 
+    let mut counts = [0usize; 2];
+    for &l in &labels {
+        if l < 2 {
+            counts[l] += 1;
+        }
+    }
+    let noise_label = if counts[0] >= counts[1] { 0 } else { 1 };
+
     let mut max_in_noise = f64::NEG_INFINITY;
     for (i, &(_n, intensity)) in points.iter().enumerate() {
-        if labels[i] == 0 && intensity.is_finite() && intensity > max_in_noise {
+        if labels[i] == noise_label && intensity.is_finite() && intensity > max_in_noise {
             max_in_noise = intensity;
         }
     }
@@ -225,7 +233,7 @@ fn x_min_value(a: &[f64]) -> f64 {
             m = v;
         }
     }
-    if m.is_finite() { m } else { 0.0 }
+    if m.is_finite() { m.abs() } else { 0.0 }
 }
 
 fn x_mean(a: &[f64]) -> f64 {

@@ -40,35 +40,35 @@ pub fn calculate_eic_from_mzml(
     options: EicOptions,
 ) -> Result<Eic, &'static str> {
     let run = mzml.run.as_ref().ok_or("no run")?;
+
     let mut ms1_idx = Vec::with_capacity(run.spectra.len());
     let mut times = Vec::with_capacity(run.spectra.len());
     for (i, s) in run.spectra.iter().enumerate() {
         if s.ms_level.unwrap_or(0) == 1 {
-            ms1_idx.push(i);
-            times.push(s.retention_time.unwrap_or(f64::NAN));
+            if let Some(rt) = s.retention_time {
+                if rt.is_finite() {
+                    ms1_idx.push(i);
+                    times.push(rt);
+                }
+            }
         }
     }
     if ms1_idx.is_empty() {
         return Err("no MS1 spectra");
     }
-    if !times.iter().any(|t| t.is_finite()) {
+    if times.is_empty() {
         return Err("no valid retention_time");
     }
 
-    let from_idx = lower_bound(&times, from_to.from);
-    let to_idx = lower_bound(&times, from_to.to);
-    let (start, end) = if from_idx <= to_idx {
-        (from_idx, to_idx)
-    } else {
-        (to_idx, from_idx)
-    };
-    let n = end.saturating_sub(start);
-    if n == 0 {
+    let start = lower_bound(&times, from_to.from);
+    let end = upper_bound(&times, from_to.to);
+    if start >= end {
         return Ok(Eic {
             x: Vec::new(),
             y: Vec::new(),
         });
     }
+    let n = end - start;
 
     let masses = parse_target_masses(target_masses).ok_or("invalid masses")?;
     if masses.is_empty() {
@@ -95,13 +95,19 @@ pub fn calculate_eic_from_mzml(
             _ => continue,
         };
 
+        let mut acc = 0.0f64;
         for &(min_mz, max_mz) in &mass_windows {
             let lo = lower_bound(mz, min_mz);
             let hi = upper_bound(mz, max_mz);
             if lo < hi {
-                y[j] = intens[hi - 1];
+                acc += intens[lo..hi]
+                    .iter()
+                    .copied()
+                    .map(|v| v as f64)
+                    .sum::<f64>();
             }
         }
+        y[j] = acc as f32;
     }
 
     Ok(Eic { x, y })
@@ -123,7 +129,7 @@ fn parse_target_masses(s: &str) -> Option<Vec<f64>> {
 
 #[inline]
 fn lower_bound(a: &[f64], x: f64) -> usize {
-    let mut lo = 0;
+    let mut lo = 0usize;
     let mut hi = a.len();
     while lo < hi {
         let mid = (lo + hi) / 2;
@@ -138,7 +144,7 @@ fn lower_bound(a: &[f64], x: f64) -> usize {
 
 #[inline]
 fn upper_bound(a: &[f64], x: f64) -> usize {
-    let mut lo = 0;
+    let mut lo = 0usize;
     let mut hi = a.len();
     while lo < hi {
         let mid = (lo + hi) / 2;

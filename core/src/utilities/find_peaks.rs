@@ -1,6 +1,10 @@
+use std::cmp::Ordering;
+
+use crate::utilities::calculate_baseline::{BaselineOptions, calculate_baseline};
 use crate::utilities::closest_index;
 use crate::utilities::find_noise_level::find_noise_level;
-use crate::utilities::get_boundaries::{BoundariesOptions, get_boundaries};
+use crate::utilities::get_boundaries::{Boundaries, BoundariesOptions, get_boundaries};
+
 use crate::utilities::scan_for_peaks::{ScanPeaksOptions, scan_for_peaks_across_windows};
 use crate::utilities::structs::{DataXY, Peak};
 use crate::utilities::utilities::xy_integration;
@@ -14,9 +18,13 @@ pub struct FilterPeaksOptions {
     pub intensity_threshold: Option<f64>,
     pub noise: Option<f64>,
     pub auto_noise: Option<bool>,
+    pub auto_baseline: Option<bool>,
     pub allow_overlap: Option<bool>,
     pub sn_ratio: Option<f64>,
+    pub gaussian_filter: Option<bool>,
+    pub gaussian_iou_error_threshold: Option<f64>,
 }
+
 impl Default for FilterPeaksOptions {
     fn default() -> Self {
         Self {
@@ -25,8 +33,11 @@ impl Default for FilterPeaksOptions {
             intensity_threshold: None,
             noise: None,
             auto_noise: Some(false),
+            auto_baseline: Some(false),
             allow_overlap: Some(false),
-            sn_ratio: Some(1.5),
+            sn_ratio: Some(1.0),
+            gaussian_filter: Some(true),
+            gaussian_iou_error_threshold: Some(0.3),
         }
     }
 }
@@ -63,13 +74,15 @@ pub struct FindPeaksOptions {
     pub get_boundaries_options: Option<BoundariesOptions>,
     pub filter_peaks_options: Option<FilterPeaksOptions>,
     pub scan_peaks_options: Option<ScanPeaksOptions>,
+    pub baseline_options: Option<BaselineOptions>,
 }
 impl Default for FindPeaksOptions {
     fn default() -> Self {
         Self {
             get_boundaries_options: Some(BoundariesOptions::default()),
             filter_peaks_options: Some(FilterPeaksOptions::default()),
-            scan_peaks_options: None,
+            scan_peaks_options: Some(ScanPeaksOptions::default()),
+            baseline_options: Some(BaselineOptions::default()),
         }
     }
 }
@@ -77,50 +90,67 @@ impl Default for FindPeaksOptions {
 pub fn find_peaks(data: &DataXY, options: Option<FindPeaksOptions>) -> Vec<Peak> {
     let o = options.unwrap_or_default();
     let filter_opts = o.filter_peaks_options.unwrap_or_default();
+    let base_opts = o.baseline_options.unwrap_or_default();
 
-    let auto_noise = filter_opts.auto_noise.unwrap_or(false);
-    let manual_noise_opt = filter_opts.noise;
-    if auto_noise && manual_noise_opt.is_some() {
-        panic!("Filter peaks: `auto_noise=true` is incompatible with a defined `noise`.");
-    }
-    let resolved_noise: f64 = if auto_noise {
-        let n = find_noise_level(&data.y) as f64;
-        if n.is_finite() && n > 0.0 { n } else { 0.0 }
-    } else if let Some(n_raw) = manual_noise_opt {
-        let n = if n_raw.is_finite() { n_raw } else { 0.0 };
-        if n >= 0.0 { n } else { 0.0 }
+    let y64: Vec<f64> = data.y.iter().map(|&v| v as f64).collect();
+    let floor = if filter_opts.auto_baseline.unwrap_or(false) {
+        let mut b = base_opts.clone();
+        b.level = Some(0);
+        calculate_baseline(&y64, b)
     } else {
-        0.0
+        vec![0.0; y64.len()]
     };
 
-    let positions =
-        scan_for_peaks_across_windows(data, o.scan_peaks_options, Some(DEFAULT_WINDOW_SIZES));
+    let y_center: Vec<f64> = y64
+        .iter()
+        .zip(&floor)
+        .map(|(a, m)| (a - m).max(0.0))
+        .collect();
+
+    let auto_noise = filter_opts.auto_noise.unwrap_or(false);
+    if auto_noise && filter_opts.noise.is_some() {
+        panic!("auto_noise=true cannot be used with noise");
+    }
+
+    let noise = if auto_noise {
+        find_noise_level(&y_center)
+    } else {
+        filter_opts.noise.unwrap_or(0.0).max(0.0)
+    };
+
+    let normalized_data = DataXY {
+        x: data.x.clone(),
+        y: y_center.iter().copied().map(|v| v as f32).collect(),
+    };
+
+    let positions = scan_for_peaks_across_windows(
+        &normalized_data,
+        o.scan_peaks_options,
+        Some(DEFAULT_WINDOW_SIZES),
+    );
     if positions.is_empty() {
         return Vec::new();
     }
 
     let mut bopt = o.get_boundaries_options.unwrap_or_default();
-    bopt.noise = resolved_noise;
-
+    bopt.noise = noise;
     let mut candidates: Vec<PeakCandidate> = Vec::with_capacity(positions.len());
-    let mut sum_integrals = 0.0f64;
-    let use_ratio = filter_opts.integral_threshold.is_some();
+    for seed_rt in positions {
+        let b = get_boundaries(&normalized_data, seed_rt, Some(bopt));
+        let seed_idx = closest_index(&normalized_data.x, seed_rt);
+        let (rt, apex_y) = apex_in_window(&normalized_data, &b).unwrap_or((
+            normalized_data.x[seed_idx],
+            normalized_data.y[seed_idx] as f64,
+        ));
 
-    for rt in positions {
-        let ai = closest_index(&data.x, rt);
-        let apex_h = data.y[ai] as f64;
-        if apex_h < resolved_noise {
+        if apex_y <= noise {
             continue;
         }
 
-        let b = get_boundaries(data, rt, Some(bopt));
         match (b.from.index, b.from.value, b.to.index, b.to.value) {
             (Some(fi), Some(fx), Some(ti), Some(tx)) if fi < ti => {
                 let (integral, intensity) = xy_integration(&data.x[fi..=ti], &data.y[fi..=ti]);
-                if use_ratio {
-                    sum_integrals += integral;
-                }
-                candidates.push(PeakCandidate {
+                let cand = PeakCandidate {
                     from: fx,
                     to: tx,
                     rt,
@@ -128,8 +158,9 @@ pub fn find_peaks(data: &DataXY, options: Option<FindPeaksOptions>) -> Vec<Peak>
                     intensity,
                     number_of_points: ti - fi + 1,
                     ratio: 0.0,
-                    noise: resolved_noise,
-                });
+                    noise,
+                };
+                candidates.push(cand);
             }
             _ => {}
         }
@@ -138,32 +169,24 @@ pub fn find_peaks(data: &DataXY, options: Option<FindPeaksOptions>) -> Vec<Peak>
         return Vec::new();
     }
 
+    // println!("{candidates:?}");
+
     let mut max_intensity = 0.0f64;
     for c in &candidates {
         if c.intensity > max_intensity {
             max_intensity = c.intensity;
         }
     }
-
-    let mut peaks = filter_peak_candidates(
-        candidates,
-        filter_opts,
-        if use_ratio { sum_integrals } else { 0.0 },
-        max_intensity,
-    );
+    let mut peaks = filter_peak_candidates(candidates, filter_opts);
 
     peaks.sort_by(|a, b| a.rt.partial_cmp(&b.rt).unwrap_or(std::cmp::Ordering::Equal));
     peaks = dedupe_near_identical(peaks);
 
-    // if !filter_opts.allow_overlap.unwrap_or(false) && peaks.len() > 1 {
-    //     peaks = prune_overlaps_by_valley(data, peaks, resolved_noise);
-    // }
-
     if !peaks.is_empty() {
         let mut cutoff = 0.0_f64;
-        if resolved_noise > 0.0 {
+        if noise > 0.0 {
             let sn_mult = filter_opts.sn_ratio.unwrap_or(1.0) as f64;
-            cutoff = sn_mult * resolved_noise;
+            cutoff = sn_mult * noise;
         }
         if let Some(user_int) = filter_opts.intensity_threshold {
             cutoff = cutoff.max(user_int);
@@ -174,98 +197,29 @@ pub fn find_peaks(data: &DataXY, options: Option<FindPeaksOptions>) -> Vec<Peak>
     }
 
     if peaks.len() > 1 {
-        let mut order: Vec<usize> = (0..peaks.len()).collect();
-        order.sort_by(|&i, &j| {
-            peaks[j]
-                .intensity
-                .partial_cmp(&peaks[i].intensity)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        let mut dx_min = f64::INFINITY;
-        for w in data.x.windows(2) {
-            let d = w[1] - w[0];
-            if d > 0.0 && d < dx_min {
-                dx_min = d;
-            }
-        }
-        let mut keep = vec![true; peaks.len()];
-        for (a_idx, &ia) in order.iter().enumerate() {
-            if !keep[ia] {
-                continue;
-            }
-            let a = &peaks[ia];
-            let width = (a.to - a.from).abs().max(if dx_min.is_finite() {
-                2.0 * dx_min
-            } else {
-                0.01
-            });
-            for &ib in order.iter().skip(a_idx + 1) {
-                if !keep[ib] {
-                    continue;
-                }
-                let b = &peaks[ib];
-                let inside_apex = b.rt >= a.from && b.rt <= a.to;
-                if !inside_apex {
-                    continue;
-                }
-                let close = (a.rt - b.rt).abs() <= 0.75 * width;
-                if !close {
-                    continue;
-                }
-                let small_rel = if a.intensity > 0.0 {
-                    b.intensity / a.intensity < 0.25
-                } else {
-                    true
-                };
-                if !small_rel {
-                    continue;
-                }
-                let iax = closest_index(&data.x, a.rt);
-                let ibx = closest_index(&data.x, b.rt);
-                let l = iax.min(ibx);
-                let r = iax.max(ibx);
-                let mut valley = f32::INFINITY;
-                let mut j = l;
-                while j <= r {
-                    let v = data.y[j];
-                    if v < valley {
-                        valley = v;
-                    }
-                    j += 1;
-                }
-                let valley_low = (valley as f64) <= (1.5 * resolved_noise);
-                if valley_low {
-                    keep[ib] = false;
-                }
-            }
-        }
-        let mut tmp = Vec::<Peak>::new();
-        for i in 0..peaks.len() {
-            if keep[i] {
-                tmp.push(peaks[i].clone());
-            }
-        }
-        tmp.sort_by(|a, b| a.rt.partial_cmp(&b.rt).unwrap_or(std::cmp::Ordering::Equal));
-        peaks = tmp;
-    }
-
-    if peaks.len() > 1 {
         peaks = suppress_contained_peaks(data, peaks);
     }
-
     peaks
 }
 
-fn filter_peak_candidates(
-    peaks: Vec<PeakCandidate>,
-    opt: FilterPeaksOptions,
-    sum: f64,
-    max_intensity: f64,
-) -> Vec<Peak> {
-    let mut out: Vec<Peak> = Vec::with_capacity(peaks.len());
-    let tall_gate = 0.60 * max_intensity;
+pub fn apex_in_window(data: &DataXY, b: &Boundaries) -> Option<(f64, f64)> {
+    let l = b.from.index?;
+    let r = b.to.index?;
+    if l >= r {
+        return None;
+    }
+    let (off, &ymax) = data.y[l..=r]
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(Ordering::Equal))?;
+    let i = l + off;
+    Some((data.x[i], ymax as f64))
+}
 
-    for mut p in peaks {
+fn filter_peak_candidates(peaks: Vec<PeakCandidate>, opt: FilterPeaksOptions) -> Vec<Peak> {
+    let mut out: Vec<Peak> = Vec::with_capacity(peaks.len());
+
+    for p in peaks {
         let mut pass = true;
 
         if let Some(min_i) = opt.intensity_threshold {
@@ -274,18 +228,8 @@ fn filter_peak_candidates(
             }
         }
         if pass {
-            if let Some(th) = opt.integral_threshold {
-                let ratio = if sum > 0.0 { p.integral / sum } else { 0.0 };
-                if ratio < th {
-                    pass = false;
-                } else {
-                    p.ratio = ratio;
-                }
-            }
-        }
-        if pass {
             if let Some(wth) = opt.width_threshold {
-                if p.number_of_points <= wth && p.intensity < tall_gate {
+                if p.number_of_points <= wth {
                     pass = false;
                 }
             }
@@ -294,7 +238,6 @@ fn filter_peak_candidates(
             out.push(Peak::from(p));
         }
     }
-
     out
 }
 
@@ -305,7 +248,6 @@ fn dedupe_near_identical(peaks: Vec<Peak>) -> Vec<Peak> {
     let mut out: Vec<Peak> = Vec::with_capacity(peaks.len());
     let eps_rt = 1e-6;
     let eps_w = 1e-6;
-
     let mut i = 0usize;
     while i < peaks.len() {
         let p = peaks[i].clone();
@@ -335,7 +277,6 @@ fn suppress_contained_peaks(data: &DataXY, peaks: Vec<Peak>) -> Vec<Peak> {
     if peaks.len() <= 1 {
         return peaks;
     }
-
     let mut order: Vec<usize> = (0..peaks.len()).collect();
     order.sort_by(|&i, &j| {
         peaks[j]
@@ -343,7 +284,6 @@ fn suppress_contained_peaks(data: &DataXY, peaks: Vec<Peak>) -> Vec<Peak> {
             .partial_cmp(&peaks[i].intensity)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-
     let mut dx_min = f64::INFINITY;
     for w in data.x.windows(2) {
         let d = w[1] - w[0];
@@ -356,7 +296,6 @@ fn suppress_contained_peaks(data: &DataXY, peaks: Vec<Peak>) -> Vec<Peak> {
     } else {
         0.01
     };
-
     let mut keep = vec![true; peaks.len()];
     for (a_idx, &ia) in order.iter().enumerate() {
         if !keep[ia] {
@@ -383,7 +322,6 @@ fn suppress_contained_peaks(data: &DataXY, peaks: Vec<Peak>) -> Vec<Peak> {
             }
         }
     }
-
     let mut out = Vec::<Peak>::new();
     for i in 0..peaks.len() {
         if keep[i] {

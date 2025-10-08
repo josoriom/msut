@@ -1401,7 +1401,7 @@ fn bytes_to_f64_as_f32_exact_into(b: &[u8], little: bool, want: usize) -> Vec<f3
         } else {
             u64::from_be_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]])
         };
-        out.push(f64::from_bits(bits) as f32); // downcast
+        out.push(f64::from_bits(bits) as f32);
     }
     out
 }

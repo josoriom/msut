@@ -3,8 +3,9 @@ use crate::utilities::structs::{DataXY, Peak, Roi};
 
 pub fn get_peak(data: &DataXY, roi: Roi, options: Option<FindPeaksOptions>) -> Option<Peak> {
     let peaks = find_peaks(data, options);
+
     if peaks.is_empty() {
-        return None;
+        return Some(Peak::default());
     }
 
     let target = roi.rt;
@@ -14,11 +15,10 @@ pub fn get_peak(data: &DataXY, roi: Roi, options: Option<FindPeaksOptions>) -> O
         0.0
     };
 
-    let mut best: Option<&Peak> = None;
-
     if w > 0.0 {
         let lo = target - w;
         let hi = target + w;
+        let mut best: Option<&Peak> = None;
         for p in &peaks {
             if p.rt.is_finite() && p.rt >= lo && p.rt <= hi {
                 match best {
@@ -34,22 +34,17 @@ pub fn get_peak(data: &DataXY, roi: Roi, options: Option<FindPeaksOptions>) -> O
                 }
             }
         }
+
+        return best.cloned().or_else(|| Some(Peak::default()));
     }
 
-    if best.is_none() {
-        for p in &peaks {
-            match best {
-                None => best = Some(p),
-                Some(b) => {
-                    let db = (b.rt - target).abs();
-                    let dp = (p.rt - target).abs();
-                    if dp < db || ((dp - db).abs() <= f64::EPSILON && p.intensity > b.intensity) {
-                        best = Some(p);
-                    }
-                }
-            }
+    let mut best_any = &peaks[0];
+    for p in &peaks {
+        let db = (best_any.rt - target).abs();
+        let dp = (p.rt - target).abs();
+        if dp < db || ((dp - db).abs() <= f64::EPSILON && p.intensity > best_any.intensity) {
+            best_any = p;
         }
     }
-
-    best.cloned()
+    Some(best_any.clone())
 }

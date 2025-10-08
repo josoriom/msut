@@ -36,7 +36,7 @@ pub fn scan_for_peaks_across_windows(
     }
 
     let opts = options.unwrap_or_default();
-    let epsilon = opts.epsilon as f32;
+    let epsilon = opts.epsilon as f64;
 
     let mut windows = Vec::new();
     for &w in window_sizes.unwrap_or(DEFAULT_WINDOW_SIZES) {
@@ -49,7 +49,7 @@ pub fn scan_for_peaks_across_windows(
     }
 
     let mut xs = Vec::<f64>::new();
-    let mut hs = Vec::<f32>::new();
+    let mut hs = Vec::<f64>::new();
     for w in windows.iter().copied() {
         for (rt, h) in scan_one_window(data, w, epsilon) {
             xs.push(rt);
@@ -75,7 +75,7 @@ pub fn scan_for_peaks_across_windows(
     } else {
         ((windows.len() as f64) * 0.30).ceil() as usize
     };
-    let mut h_max = 0.0f32;
+    let mut h_max = 0.0f64;
     for &h in &best_h {
         if h > h_max {
             h_max = h;
@@ -83,7 +83,7 @@ pub fn scan_for_peaks_across_windows(
     }
     let strong_gate = 0.60 * h_max;
 
-    let mut keep = Vec::<(f64, f32)>::new();
+    let mut keep = Vec::<(f64, f64)>::new();
     for i in 0..centers.len() {
         if votes[i] >= need || best_h[i] >= strong_gate {
             keep.push((centers[i], best_h[i]));
@@ -96,9 +96,11 @@ pub fn scan_for_peaks_across_windows(
 
     let noise = find_noise_level(&data.y);
     let w_largest = *windows.iter().max().unwrap();
+    let y64: Vec<f64> = data.y.iter().map(|&v| v as f64).collect();
+
     let y_smooth = if w_largest <= n {
         sgg(
-            &data.y,
+            &y64,
             &data.x,
             SggOptions {
                 window_size: w_largest,
@@ -107,10 +109,10 @@ pub fn scan_for_peaks_across_windows(
             },
         )
     } else {
-        data.y.clone()
+        y64.clone()
     };
 
-    let mut merged = Vec::<(f64, f32)>::new();
+    let mut merged = Vec::<(f64, f64)>::new();
     let mut i = 0usize;
     while i < keep.len() {
         let (xa, ha) = keep[i];
@@ -125,14 +127,14 @@ pub fn scan_for_peaks_across_windows(
         let l = ia.min(ib);
         let r = ia.max(ib);
 
-        let mut valley = f32::INFINITY;
+        let mut valley = f64::INFINITY;
         for j in l..=r {
             if y_smooth[j] < valley {
                 valley = y_smooth[j];
             }
         }
 
-        let h_top = if ha > hb { ha } else { hb };
+        let h_top = if ha > hb { ha } else { hb } as f64;
         let rel_drop = if h_top > 0.0 {
             (h_top - valley) / h_top
         } else {
@@ -140,7 +142,7 @@ pub fn scan_for_peaks_across_windows(
         };
         let valley_gate = noise.max(0.92_f64 * (h_top as f64));
 
-        if (valley as f64) > valley_gate || rel_drop < 0.08_f32 {
+        if (valley as f64) > valley_gate || rel_drop < 0.08_f64 {
             merged.push(if ha >= hb { (xa, ha) } else { (xb, hb) });
             i += 2;
         } else {
@@ -155,7 +157,7 @@ pub fn scan_for_peaks_across_windows(
     let sep = min_sep(&data.x, 5);
     let mut out = Vec::<f64>::new();
     let mut last_x = f64::NEG_INFINITY;
-    let mut last_h = f32::NEG_INFINITY;
+    let mut last_h = f64::NEG_INFINITY;
     for (x, h) in merged {
         if !last_x.is_finite() || x - last_x >= sep {
             out.push(x);
@@ -172,7 +174,7 @@ pub fn scan_for_peaks_across_windows(
     out
 }
 
-fn scan_one_window(data: &DataXY, window: usize, epsilon: f32) -> Vec<(f64, f32)> {
+fn scan_one_window(data: &DataXY, window: usize, epsilon: f64) -> Vec<(f64, f64)> {
     let n = data.x.len();
     if n < 3 {
         return Vec::new();
@@ -195,11 +197,13 @@ fn scan_one_window(data: &DataXY, window: usize, epsilon: f32) -> Vec<(f64, f32)
         polynomial: 3,
     };
 
-    let y0 = sgg(&data.y, &data.x, sm0);
-    let y1 = sgg(&data.y, &data.x, sm1);
-    let y2 = sgg(&data.y, &data.x, sm2);
+    let y_f64: Vec<f64> = data.y.iter().copied().map(f64::from).collect();
 
-    let mut cand = Vec::<(f64, f32, usize)>::with_capacity(n / 3);
+    let y0 = sgg(&y_f64, &data.x, sm0);
+    let y1 = sgg(&y_f64, &data.x, sm1);
+    let y2 = sgg(&y_f64, &data.x, sm2);
+
+    let mut cand = Vec::<(f64, f64, usize)>::with_capacity(n / 3);
 
     for k in 0..(n - 1) {
         let a = if y1[k] > epsilon {
@@ -218,7 +222,7 @@ fn scan_one_window(data: &DataXY, window: usize, epsilon: f32) -> Vec<(f64, f32)
         };
         if (a > 0 && b <= 0) || (a >= 0 && b < 0) {
             let denom = y1[k] - y1[k + 1];
-            let xp = if denom.abs() > f32::EPSILON {
+            let xp = if denom.abs() > f64::EPSILON {
                 data.x[k] + (data.x[k + 1] - data.x[k]) * (y1[k] / denom) as f64
             } else {
                 0.5 * (data.x[k] + data.x[k + 1])
@@ -271,14 +275,14 @@ fn scan_one_window(data: &DataXY, window: usize, epsilon: f32) -> Vec<(f64, f32)
     }
     cand.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-    let mut out = Vec::<(f64, f32)>::with_capacity(cand.len());
+    let mut out = Vec::<(f64, f64)>::with_capacity(cand.len());
     let min_step = min_positive_step(&data.x)
         .unwrap_or_else(|| mean_step(&data.x))
         .max(f64::EPSILON);
     let min_sep = (1.2 * min_step).max(0.01);
 
     let mut last_x = f64::NEG_INFINITY;
-    let mut last_y = f32::NEG_INFINITY;
+    let mut last_y = f64::NEG_INFINITY;
     for (x, y, _) in cand {
         if !last_x.is_finite() || x - last_x >= min_sep {
             out.push((x, y));
@@ -295,7 +299,7 @@ fn scan_one_window(data: &DataXY, window: usize, epsilon: f32) -> Vec<(f64, f32)
     out
 }
 
-fn group_peak_positions(xs: &[f64], hs: &[f32], tol: f64) -> (Vec<f64>, Vec<usize>, Vec<f32>) {
+fn group_peak_positions(xs: &[f64], hs: &[f64], tol: f64) -> (Vec<f64>, Vec<usize>, Vec<f64>) {
     if xs.is_empty() || xs.len() != hs.len() {
         return (Vec::new(), Vec::new(), Vec::new());
     }
@@ -346,7 +350,7 @@ fn group_peak_positions(xs: &[f64], hs: &[f32], tol: f64) -> (Vec<f64>, Vec<usiz
     let kfin = centers.len();
 
     let mut votes = vec![0usize; kfin];
-    let mut best_h = vec![f32::NEG_INFINITY; kfin];
+    let mut best_h = vec![f64::NEG_INFINITY; kfin];
 
     for i in 0..xs.len() {
         let x = xs[i];
