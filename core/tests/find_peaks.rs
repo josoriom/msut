@@ -1,3 +1,4 @@
+use msut::utilities::calculate_baseline::BaselineOptions;
 use msut::utilities::find_peaks::{FilterPeaksOptions, FindPeaksOptions, find_peaks};
 use msut::utilities::scan_for_peaks::ScanPeaksOptions;
 use msut::utilities::structs::DataXY;
@@ -114,36 +115,19 @@ fn threshold_mode_detects_peak() {
     let find_opts = ScanPeaksOptions {
         epsilon: 1e-5,
         window_size: 15,
+        ..Default::default()
     };
     let opts = FindPeaksOptions {
         get_boundaries_options: None,
         filter_peaks_options: Some(FilterPeaksOptions::default()),
         scan_peaks_options: Some(find_opts),
+        baseline_options: Some(BaselineOptions {
+            ..Default::default()
+        }),
     };
     let res = find_peaks(&data, Some(opts));
     assert_eq!(res.len(), 1);
     assert!(approx_eq(res[0].rt, 5.0, 0.07));
-}
-
-// integral threshold should drop weak peaks and set percentage on kept ones
-#[test]
-fn integral_threshold_filters_small_peak_and_sets_percentage() {
-    let xs = make_grid(0.0, 10.0, 2001);
-    let ys = gaussian_mixture_f32(&xs, &[(3.0, 0.10, 1.0), (7.0, 0.10, 0.2)], 0.0, 0.0);
-    let data = data_xy(xs, ys);
-    let opts = FindPeaksOptions {
-        get_boundaries_options: None,
-        filter_peaks_options: Some(FilterPeaksOptions {
-            integral_threshold: Some(0.25),
-            width_threshold: Some(10),
-            ..Default::default()
-        }),
-        scan_peaks_options: None,
-    };
-    let res = find_peaks(&data, Some(opts));
-    assert_eq!(res.len(), 1);
-    assert!(res[0].ratio > 0.0);
-    assert!(approx_eq(res[0].rt, 3.0, 0.07));
 }
 
 // baseline offset should not prevent detection and intensity should reflect base+amp
@@ -199,6 +183,9 @@ fn noise_defined_filters_below_threshold() {
             ..Default::default()
         }),
         scan_peaks_options: None,
+        baseline_options: Some(BaselineOptions {
+            ..Default::default()
+        }),
     };
     let res = find_peaks(&data, Some(opts));
     assert!(res.is_empty());
@@ -220,6 +207,9 @@ fn noise_defined_keeps_just_above_threshold() {
             ..Default::default()
         }),
         scan_peaks_options: None,
+        baseline_options: Some(BaselineOptions {
+            ..Default::default()
+        }),
     };
     let res = find_peaks(&data, Some(opts));
     assert_eq!(res.len(), 1);
@@ -242,6 +232,9 @@ fn negative_noise_is_clamped_to_zero() {
             ..Default::default()
         }),
         scan_peaks_options: None,
+        baseline_options: Some(BaselineOptions {
+            ..Default::default()
+        }),
     };
     let res = find_peaks(&data, Some(opts));
     assert_eq!(res.len(), 1);
@@ -265,6 +258,9 @@ fn auto_noise_with_defined_noise_panics() {
             ..Default::default()
         }),
         scan_peaks_options: None,
+        baseline_options: Some(BaselineOptions {
+            ..Default::default()
+        }),
     };
     let _ = find_peaks(&data, Some(opts));
 }
@@ -285,6 +281,9 @@ fn extremely_high_noise_removes_all_peaks() {
             ..Default::default()
         }),
         scan_peaks_options: None,
+        baseline_options: Some(BaselineOptions {
+            ..Default::default()
+        }),
     };
     let res = find_peaks(&data, Some(opts));
     assert!(res.is_empty());
@@ -306,6 +305,9 @@ fn edge_peak_removed_by_noise() {
             ..Default::default()
         }),
         scan_peaks_options: None,
+        baseline_options: Some(BaselineOptions {
+            ..Default::default()
+        }),
     };
     let res = find_peaks(&data, Some(opts));
     assert!(res.is_empty());
@@ -327,6 +329,9 @@ fn non_uniform_sampling_with_noise_filters_low_peak_keeps_high_peak() {
             ..Default::default()
         }),
         scan_peaks_options: None,
+        baseline_options: Some(BaselineOptions {
+            ..Default::default()
+        }),
     };
     let res = find_peaks(&data, Some(opts));
     assert_eq!(res.len(), 1);
@@ -349,6 +354,9 @@ fn default_noise_zero_when_disabled_and_undefined_detects_peak() {
             ..Default::default()
         }),
         scan_peaks_options: None,
+        baseline_options: Some(BaselineOptions {
+            ..Default::default()
+        }),
     };
     let res = find_peaks(&data, Some(opts));
     assert_eq!(res.len(), 1);

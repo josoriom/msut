@@ -25,7 +25,7 @@ impl Default for BoundariesOptions {
             epsilon: 1e-5,
             noise: 0.0,
             n_steps: 3,
-            baseline_run: 5,
+            baseline_run: 3,
         }
     }
 }
@@ -100,8 +100,8 @@ fn walk(
         };
     }
 
-    let mut current = start as isize + if direction > 0 { 1 } else { -1 };
-    let min_stop = global_min + epsilon;
+    let mut current_position = start as isize + if direction > 0 { 1 } else { -1 };
+    let baseline_stop = global_min + epsilon;
 
     let mut baseline_count: usize = 0;
 
@@ -112,16 +112,16 @@ fn walk(
     let mut local_min_idx: isize = start as isize;
     let mut local_min_val: f64 = y[start] as f64;
 
-    while current >= 0 && current < n - 1 {
-        let next = current + if direction > 0 { 1 } else { -1 };
+    while current_position >= 0 && current_position < n - 1 {
+        let next = current_position + if direction > 0 { 1 } else { -1 };
         if next < 0 || next >= n {
             break;
         }
 
-        let i = current as usize;
+        let i = current_position as usize;
         let j = next as usize;
 
-        if (y[i] as f64) <= min_stop {
+        if (y[i] as f64) <= baseline_stop {
             return Boundary {
                 index: Some(i),
                 value: Some(x[i]),
@@ -162,7 +162,7 @@ fn walk(
                     steps_up += 1;
                     if steps_up >= n_steps {
                         let rise = (y[j] as f64) - local_min_val;
-                        if rise >= noise {
+                        if rise >= (noise * 0.1) {
                             let k = local_min_idx.clamp(0, n - 1) as usize;
                             return Boundary {
                                 index: Some(k),
@@ -177,15 +177,15 @@ fn walk(
             }
         }
 
-        if (y[i] as f64) <= noise {
+        if (y[j] as f64) <= epsilon {
             baseline_count += 1;
             if baseline_count >= baseline_run.max(1) {
                 let first = if direction > 0 {
-                    current - (baseline_run as isize - 1)
+                    (j + 1).saturating_sub(baseline_run)
                 } else {
-                    current + (baseline_run as isize - 1)
+                    j.saturating_add(baseline_run.saturating_sub(1))
                 };
-                let k = first.clamp(0, n - 1) as usize;
+                let k = (first as isize).clamp(0, n - 1) as usize;
                 return Boundary {
                     index: Some(k),
                     value: Some(x[k]),
@@ -195,7 +195,19 @@ fn walk(
             baseline_count = 0;
         }
 
-        current += direction;
+        current_position += direction;
+    }
+
+    let edge = if direction > 0 {
+        (n - 1) as usize
+    } else {
+        0usize
+    };
+    if (y[edge] as f64) <= baseline_stop {
+        return Boundary {
+            index: Some(edge),
+            value: Some(x[edge]),
+        };
     }
 
     Boundary {
