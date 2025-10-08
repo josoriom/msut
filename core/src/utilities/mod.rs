@@ -11,8 +11,8 @@ pub mod find_peaks;
 
 pub mod functions;
 
-pub mod get_baseline;
-pub use get_baseline::get_baseline;
+pub mod calculate_baseline;
+pub use calculate_baseline::calculate_baseline;
 
 pub mod get_boundaries;
 

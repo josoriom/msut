@@ -17,7 +17,7 @@ impl Default for BaselineOptions {
     }
 }
 
-pub fn get_baseline(y: &[f64], options: BaselineOptions) -> Vec<f64> {
+pub fn calculate_baseline(y: &[f64], options: BaselineOptions) -> Vec<f64> {
     let n = y.len();
     if n == 0 {
         return Vec::new();
