@@ -25,3 +25,4 @@ pub use utilities::{
 
 pub mod lm;
 pub use lm::lm;
+pub mod functions;
