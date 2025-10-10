@@ -25,6 +25,7 @@ use utilities::{
 
 use crate::utilities::{
     calculate_baseline::{BaselineOptions, calculate_baseline as calculate_baseline_rs},
+    find_features::{FindFeaturesOptions, MzScanGrid, find_features as find_features_rs},
     structs::{ChromRoi, EicRoi},
 };
 
@@ -147,7 +148,7 @@ pub unsafe extern "C" fn parse_mzml_to_json(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn get_peak(
     x_ptr: *const f64,
-    y_ptr: *const f32,
+    y_ptr: *const f64,
     len: usize,
     rt: f64,
     range: f64,
@@ -406,7 +407,7 @@ pub unsafe extern "C" fn get_peaks_from_chrom(
 #[unsafe(no_mangle)]
 pub extern "C" fn find_peaks(
     x_ptr: *const f64,
-    y_ptr: *const f32,
+    y_ptr: *const f64,
     len: usize,
     options: *const CPeakPOptions,
     out_json: *mut Buf,
@@ -494,8 +495,7 @@ pub unsafe extern "C" fn bin_to_json(
 pub unsafe extern "C" fn calculate_eic(
     bin_ptr: *const u8,
     bin_len: usize,
-    target_ptr: *const u8,
-    target_len: usize,
+    target: f64,
     from_time: f64,
     to_time: f64,
     ppm_tolerance: f64,
@@ -503,17 +503,15 @@ pub unsafe extern "C" fn calculate_eic(
     out_x: *mut Buf,
     out_y: *mut Buf,
 ) -> c_int {
-    if bin_ptr.is_null() || target_ptr.is_null() || out_x.is_null() || out_y.is_null() {
+    if bin_ptr.is_null() || out_x.is_null() || out_y.is_null() {
         return ERR_INVALID_ARGS;
     }
     let res = catch_unwind(AssertUnwindSafe(|| -> Result<(), c_int> {
         let bin = unsafe { slice::from_raw_parts(bin_ptr, bin_len) };
-        let target = std::str::from_utf8(unsafe { slice::from_raw_parts(target_ptr, target_len) })
-            .map_err(|_| ERR_PARSE)?;
 
         let eic = calculate_eic_from_bin1(
             bin,
-            target,
+            &target,
             FromTo {
                 from: from_time,
                 to: to_time,
@@ -526,7 +524,7 @@ pub unsafe extern "C" fn calculate_eic(
         .map_err(|_| ERR_PARSE)?;
 
         let x_bytes = f64_slice_to_u8_box(&eic.x);
-        let y_bytes = f32_slice_to_u8_box(&eic.y);
+        let y_bytes = f64_slice_to_u8_box(&eic.y);
         write_buf(out_x, x_bytes);
         write_buf(out_y, y_bytes);
         Ok(())
@@ -536,6 +534,95 @@ pub unsafe extern "C" fn calculate_eic(
         Ok(Err(code)) => code,
         Err(_) => ERR_PANIC,
     }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn find_features(
+    data_ptr: *const u8,
+    data_len: usize,
+    from_time: f64,
+    to_time: f64,
+    eic_ppm_tolerance: f64,
+    eic_mz_tolerance: f64,
+    grid_start: f64,
+    grid_end: f64,
+    grid_step: f64,
+    peak_opts: *const CPeakPOptions,
+    cores: c_int,
+    out_json: *mut Buf,
+) -> c_int {
+    if data_ptr.is_null() || out_json.is_null() || !from_time.is_finite() || !to_time.is_finite() {
+        return ERR_INVALID_ARGS;
+    }
+    if !(to_time > from_time) {
+        return ERR_INVALID_ARGS;
+    }
+
+    let run = || -> Result<(), c_int> {
+        let bytes = unsafe { slice::from_raw_parts(data_ptr, data_len) };
+
+        let mzml = parse_mzml_rs(bytes, true).map_err(|_| ERR_PARSE)?;
+
+        let mut eic_opts = EicOptions::default();
+        if eic_ppm_tolerance.is_finite() && eic_ppm_tolerance >= 0.0 {
+            eic_opts.ppm_tolerance = eic_ppm_tolerance;
+        }
+        if eic_mz_tolerance.is_finite() && eic_mz_tolerance >= 0.0 {
+            eic_opts.mz_tolerance = eic_mz_tolerance;
+        }
+
+        let mut mzr = MzScanGrid::default();
+        if grid_start.is_finite() {
+            mzr.mz_min = grid_start;
+        }
+        if grid_end.is_finite() {
+            mzr.mz_max = grid_end;
+        }
+        if grid_step > 0.0 {
+            mzr.step_size = grid_step as f64;
+        }
+
+        let fp_opts = build_find_peaks_options(peak_opts);
+
+        let feats = find_features_rs(
+            &mzml,
+            FromTo {
+                from: from_time,
+                to: to_time,
+            },
+            Some(FindFeaturesOptions {
+                eic_options: Some(eic_opts),
+                find_peaks: Some(fp_opts),
+                mz_scan_grid: Some(mzr),
+                ..Default::default()
+            }),
+            if cores > 0 { cores as usize } else { 1 },
+        );
+
+        let mut arr = Vec::with_capacity(feats.len());
+        for f in feats {
+            arr.push(serde_json::json!({
+                "mz":        f64_ok(f.mz),
+                "rt":        f64_ok(f.rt),
+                "intensity": f64_ok(f.intensity),
+                "from": f64_ok(f.from),
+                "to": f64_ok(f.to),
+            }));
+        }
+        let s = serde_json::to_string(&arr).map_err(|_| ERR_PARSE)?;
+        write_buf(out_json, s.into_bytes().into_boxed_slice());
+        Ok(())
+    };
+
+    match catch_unwind(AssertUnwindSafe(run)) {
+        Ok(Ok(())) => OK,
+        Ok(Err(code)) => code,
+        Err(_) => ERR_PANIC,
+    }
+}
+
+fn f64_ok(v: f64) -> f64 {
+    if v.is_finite() { v } else { 0.0 }
 }
 
 #[unsafe(no_mangle)]
@@ -579,16 +666,6 @@ pub unsafe extern "C" fn calculate_baseline(
 
 fn f64_slice_to_u8_box(v: &[f64]) -> Box<[u8]> {
     let n = v.len() * 8;
-    let mut out = Vec::<u8>::with_capacity(n);
-    unsafe {
-        out.set_len(n);
-        ptr::copy_nonoverlapping(v.as_ptr() as *const u8, out.as_mut_ptr(), n);
-    }
-    out.into_boxed_slice()
-}
-
-fn f32_slice_to_u8_box(v: &[f32]) -> Box<[u8]> {
-    let n = v.len() * 4;
     let mut out = Vec::<u8>::with_capacity(n);
     unsafe {
         out.set_len(n);

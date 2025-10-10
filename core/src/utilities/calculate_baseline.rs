@@ -10,8 +10,8 @@ pub struct BaselineOptions {
 impl Default for BaselineOptions {
     fn default() -> Self {
         Self {
-            baseline_window: Some(10.0),
-            baseline_window_factor: Some(100),
+            baseline_window: Some(20.0),
+            baseline_window_factor: Some(10),
             level: Some(1),
         }
     }

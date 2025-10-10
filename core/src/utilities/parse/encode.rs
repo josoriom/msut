@@ -1,8 +1,5 @@
 use crate::utilities::parse::{
-    helper::{
-        ensure_cap, set_f64_at, set_u32_at, set_u64_at, write_f32_at, write_f32_le, write_f64_at,
-        write_f64_le,
-    },
+    helper::{ensure_cap, set_f64_at, set_u32_at, set_u64_at, write_f64_at, write_f64_le},
     parse_mzml::MzML,
 };
 
@@ -26,9 +23,9 @@ pub fn encode(mzml: &MzML) -> Vec<u8> {
             set_u32_at(&mut out, 4, 0);
             set_u32_at(&mut out, 8, 0);
             out[12] = 2;
-            out[13] = 1;
+            out[13] = 2;
             out[14] = 2;
-            out[15] = 1;
+            out[15] = 2;
             set_u64_at(&mut out, 56, H as u64);
             return out;
         }
@@ -53,7 +50,7 @@ pub fn encode(mzml: &MzML) -> Vec<u8> {
     for s in &run.spectra {
         if let Some(v) = &s.intensity_array {
             plan = a8(plan);
-            plan += v.len() * 4;
+            plan += v.len() * 8;
         }
     }
     for c in &run.chromatograms {
@@ -65,7 +62,7 @@ pub fn encode(mzml: &MzML) -> Vec<u8> {
     for c in &run.chromatograms {
         if let Some(v) = &c.intensity_array {
             plan = a8(plan);
-            plan += v.len() * 4;
+            plan += v.len() * 8;
         }
     }
     for c in &run.chromatograms {
@@ -86,9 +83,9 @@ pub fn encode(mzml: &MzML) -> Vec<u8> {
     set_u32_at(&mut out, 4, n_spec);
     set_u32_at(&mut out, 8, n_ch);
     out[12] = 2;
-    out[13] = 1;
+    out[13] = 2;
     out[14] = 2;
-    out[15] = 1;
+    out[15] = 2;
 
     let spec_index_off = cur as u64;
     cur += sb;
@@ -111,7 +108,7 @@ pub fn encode(mzml: &MzML) -> Vec<u8> {
     let mut sy: Vec<(u64, u32)> = Vec::with_capacity(n_spec as usize);
     for s in &run.spectra {
         let p = match &s.intensity_array {
-            Some(v) if !v.is_empty() => unsafe { write_f32_le(&mut out, &mut cur, v) },
+            Some(v) if !v.is_empty() => unsafe { write_f64_le(&mut out, &mut cur, v) },
             _ => (0, 0),
         };
         sy.push(p);
@@ -127,7 +124,7 @@ pub fn encode(mzml: &MzML) -> Vec<u8> {
     let mut cy: Vec<(u64, u32)> = Vec::with_capacity(n_ch as usize);
     for c in &run.chromatograms {
         let p = match &c.intensity_array {
-            Some(v) if !v.is_empty() => unsafe { write_f32_le(&mut out, &mut cur, v) },
+            Some(v) if !v.is_empty() => unsafe { write_f64_le(&mut out, &mut cur, v) },
             _ => (0, 0),
         };
         cy.push(p);
@@ -238,9 +235,9 @@ pub fn encode_arrays(mzml: &MzML) -> Vec<u8> {
             out[0..4].copy_from_slice(b"BINS");
             set_u32_at(&mut out, 4, 1);
             out[12] = 2;
-            out[13] = 1;
+            out[13] = 2;
             out[14] = 2;
-            out[15] = 1;
+            out[15] = 2;
             set_u64_at(&mut out, 48, H as u64);
             set_u64_at(&mut out, 56, H as u64);
             return out;
@@ -270,7 +267,7 @@ pub fn encode_arrays(mzml: &MzML) -> Vec<u8> {
         if let Some(v) = &s.intensity_array {
             cur = a8(cur);
             sin.push((cur as u64, v.len() as u32));
-            cur += v.len() * 4;
+            cur += v.len() * 8;
         } else {
             sin.push((0, 0));
         }
@@ -290,7 +287,7 @@ pub fn encode_arrays(mzml: &MzML) -> Vec<u8> {
         if let Some(v) = &c.intensity_array {
             cur = a8(cur);
             cin.push((cur as u64, v.len() as u32));
-            cur += v.len() * 4;
+            cur += v.len() * 8;
         } else {
             cin.push((0, 0));
         }
@@ -303,9 +300,9 @@ pub fn encode_arrays(mzml: &MzML) -> Vec<u8> {
     set_u32_at(&mut out, 4, n_spec);
     set_u32_at(&mut out, 8, n_ch);
     out[12] = 2;
-    out[13] = 1;
+    out[13] = 2;
     out[14] = 2;
-    out[15] = 1;
+    out[15] = 2;
 
     let s_idx_off = H as u64;
     let c_idx_off = (H + sb) as u64;
@@ -340,7 +337,7 @@ pub fn encode_arrays(mzml: &MzML) -> Vec<u8> {
     for (i, s) in run.spectra.iter().enumerate() {
         if let (Some(v), (off, len)) = (&s.intensity_array, sin[i]) {
             if off != 0 && len != 0 {
-                unsafe { write_f32_at(&mut out, off as usize, v) }
+                unsafe { write_f64_at(&mut out, off as usize, v) }
             }
         }
     }
@@ -354,7 +351,7 @@ pub fn encode_arrays(mzml: &MzML) -> Vec<u8> {
     for (i, c) in run.chromatograms.iter().enumerate() {
         if let (Some(v), (off, len)) = (&c.intensity_array, cin[i]) {
             if off != 0 && len != 0 {
-                unsafe { write_f32_at(&mut out, off as usize, v) }
+                unsafe { write_f64_at(&mut out, off as usize, v) }
             }
         }
     }

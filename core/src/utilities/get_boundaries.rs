@@ -83,7 +83,7 @@ pub fn get_boundaries(
 
 fn walk(
     x: &[f64],
-    y: &[f32],
+    y: &[f64],
     start: usize,
     direction: isize,
     epsilon: f64,
@@ -162,7 +162,7 @@ fn walk(
                     steps_up += 1;
                     if steps_up >= n_steps {
                         let rise = (y[j] as f64) - local_min_val;
-                        if rise >= (noise * 0.1) {
+                        if rise >= noise {
                             let k = local_min_idx.clamp(0, n - 1) as usize;
                             return Boundary {
                                 index: Some(k),

@@ -42,7 +42,7 @@ fn compute_one(
     ch_index: usize,
     ch_id: &str,
     x: Vec<f64>,
-    y: Vec<f32>,
+    y: Vec<f64>,
     roi: &ChromRoi,
     options: &Option<FindPeaksOptions>,
 ) -> (usize, String, f64, f64, f64, f64, f64, f64) {

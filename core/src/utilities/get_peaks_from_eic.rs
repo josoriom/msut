@@ -38,10 +38,9 @@ fn compute_one(
     roi: &EicRoi,
     options: &Option<FindPeaksOptions>,
 ) -> (String, f64, f64, Peak) {
-    let mz_str = roi.mz.to_string();
     let eic = match calculate_eic_from_mzml(
         mzml,
-        &mz_str,
+        &roi.mz,
         from_to,
         EicOptions {
             ppm_tolerance: 20.0,

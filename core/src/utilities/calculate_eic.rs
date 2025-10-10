@@ -1,6 +1,8 @@
+use std::{cmp::Ordering, sync::Arc};
+
 use crate::utilities::{
     parse::{decode::decode, parse_mzml::MzML},
-    structs::FromTo,
+    structs::{FromTo, Peak},
 };
 
 #[derive(Clone, Copy)]
@@ -20,115 +22,178 @@ impl Default for EicOptions {
 
 pub struct Eic {
     pub x: Vec<f64>,
-    pub y: Vec<f32>,
+    pub y: Vec<f64>,
 }
 
 pub fn calculate_eic_from_bin1(
     bin1: &[u8],
-    target_masses: &str,
+    target_mass: &f64,
     from_to: FromTo,
     options: EicOptions,
 ) -> Result<Eic, &'static str> {
     let mzml = decode(bin1).map_err(|_| "decode BIN1 failed")?;
-    calculate_eic_from_mzml(&mzml, target_masses, from_to, options)
+    calculate_eic_from_mzml(&mzml, target_mass, from_to, options)
 }
 
 pub fn calculate_eic_from_mzml(
     mzml: &MzML,
-    target_masses: &str,
+    target_mass: &f64,
     from_to: FromTo,
     options: EicOptions,
 ) -> Result<Eic, &'static str> {
-    let run = mzml.run.as_ref().ok_or("no run")?;
-
-    let mut ms1_idx = Vec::with_capacity(run.spectra.len());
-    let mut times = Vec::with_capacity(run.spectra.len());
-    for (i, s) in run.spectra.iter().enumerate() {
-        if s.ms_level.unwrap_or(0) == 1 {
-            if let Some(rt) = s.retention_time {
-                if rt.is_finite() {
-                    ms1_idx.push(i);
-                    times.push(rt);
-                }
-            }
-        }
-    }
-    if ms1_idx.is_empty() {
-        return Err("no MS1 spectra");
-    }
-    if times.is_empty() {
-        return Err("no valid retention_time");
-    }
-
-    let start = lower_bound(&times, from_to.from);
-    let end = upper_bound(&times, from_to.to);
-    if start >= end {
+    let (times, scans) = collect_ms1_scans(mzml, from_to);
+    if scans.is_empty() || times.is_empty() {
         return Ok(Eic {
             x: Vec::new(),
             y: Vec::new(),
         });
     }
-    let n = end - start;
-
-    let masses = parse_target_masses(target_masses).ok_or("invalid masses")?;
-    if masses.is_empty() {
-        return Err("no valid masses");
-    }
-    let mass_windows: Vec<(f64, f64)> = masses
-        .iter()
-        .map(|&m| {
-            let tol = ((options.ppm_tolerance / 1e6) * m).max(options.mz_tolerance);
-            (m - tol, m + tol)
-        })
-        .collect();
-
-    let mut x = Vec::with_capacity(n);
-    let mut y = vec![0f32; n];
-
-    for (j, &spec_i) in ms1_idx[start..end].iter().enumerate() {
-        let s = &run.spectra[spec_i];
-        x.push(s.retention_time.unwrap_or(f64::NAN));
-
-        let (mz_opt, intens_opt) = (s.mz_array.as_deref(), s.intensity_array.as_deref());
-        let (mz, intens) = match (mz_opt, intens_opt) {
-            (Some(mz), Some(intens)) if !mz.is_empty() && mz.len() == intens.len() => (mz, intens),
-            _ => continue,
-        };
-
-        let mut acc = 0.0f64;
-        for &(min_mz, max_mz) in &mass_windows {
-            let lo = lower_bound(mz, min_mz);
-            let hi = upper_bound(mz, max_mz);
-            if lo < hi {
-                acc += intens[lo..hi]
-                    .iter()
-                    .copied()
-                    .map(|v| v as f64)
-                    .sum::<f64>();
-            }
-        }
-        y[j] = acc as f32;
-    }
-
-    Ok(Eic { x, y })
+    let y = compute_eic_for_mz(&scans, times.len(), target_mass, options);
+    Ok(Eic { x: times, y })
 }
 
-fn parse_target_masses(s: &str) -> Option<Vec<f64>> {
-    let mut out = Vec::new();
-    for tok in s.split(|c: char| c.is_whitespace() || c == ',' || c == ';') {
-        if tok.is_empty() {
-            continue;
+#[derive(Clone)]
+pub struct CentroidScan {
+    pub rt: f64,
+    pub mz: Arc<[f64]>,
+    pub intensity: Arc<[f64]>,
+}
+
+pub fn compute_eic_for_mz(
+    scans: &[CentroidScan],
+    rt_len: usize,
+    center: &f64,
+    opts: EicOptions,
+) -> Vec<f64> {
+    let tol_ppm = if opts.ppm_tolerance > 0.0 {
+        (opts.ppm_tolerance * 1e-6) * center
+    } else {
+        0.0
+    };
+    let tol = tol_ppm.max(opts.mz_tolerance.max(0.0));
+    if !(tol.is_finite()) || tol <= 0.0 {
+        panic!("[panic] invalid EIC tol for center={}", center);
+    }
+    let lo = center - tol;
+    let hi = center + tol;
+
+    let mut y = vec![0.0f64; rt_len];
+    for (i, s) in scans.iter().enumerate() {
+        let mzs = &s.mz;
+        let ints = &s.intensity;
+        let mut acc = 0.0f64;
+        let mut j = lower_bound(mzs, lo);
+        let mut guard = 0usize;
+        while j < mzs.len() {
+            let v = mzs[j];
+            if v > hi {
+                break;
+            }
+            acc += ints[j] as f64;
+            j += 1;
+            guard += 1;
+            if guard > 5_000_000 {
+                panic!(
+                    "[panic] compute_eic_for_mz inner loop too long at rt index {}",
+                    i
+                );
+            }
         }
-        match tok.parse::<f64>() {
-            Ok(v) if v.is_finite() => out.push(v),
-            _ => return None,
+        y[i] = acc;
+    }
+    y
+}
+
+pub fn collect_ms1_scans(mzml: &MzML, time_window: FromTo) -> (Vec<f64>, Vec<CentroidScan>) {
+    let mut scans = Vec::new();
+    let mut total_points: usize = 0;
+    let mut dropped_points: usize = 0;
+
+    if let Some(run) = &mzml.run {
+        for s in &run.spectra {
+            let is_ms1 = matches!(s.ms_level, Some(1));
+            let ok_rt = matches!(s.retention_time, Some(rt) if rt >= time_window.from && rt <= time_window.to);
+            let has_arrays = s.mz_array.as_ref().map(|v| !v.is_empty()).unwrap_or(false)
+                && s.intensity_array
+                    .as_ref()
+                    .map(|v| !v.is_empty())
+                    .unwrap_or(false);
+            if is_ms1 && ok_rt && has_arrays {
+                let rt = s.retention_time.unwrap_or_default();
+                let mzs_src = s.mz_array.clone().unwrap_or_default();
+                let ints_src = s.intensity_array.clone().unwrap_or_default();
+                let len = mzs_src.len().min(ints_src.len());
+                let mut mzs = Vec::with_capacity(len);
+                let mut ints = Vec::with_capacity(len);
+                for i in 0..len {
+                    let m = mzs_src[i];
+                    let it = ints_src[i];
+                    total_points += 1;
+                    if m.is_finite() && it.is_finite() {
+                        mzs.push(m);
+                        ints.push(it);
+                    } else {
+                        dropped_points += 1;
+                    }
+                }
+                if !mzs.is_empty() {
+                    scans.push(CentroidScan {
+                        rt,
+                        mz: Arc::from(mzs),
+                        intensity: Arc::from(ints),
+                    });
+                }
+            }
         }
     }
-    Some(out)
+    if dropped_points > 0 {
+        eprintln!(
+            "[warn] dropped {} non-finite points out of {}",
+            dropped_points, total_points
+        );
+    }
+    if scans.is_empty() {
+        eprintln!("[warn] no MS1 scans found in time window");
+    }
+    scans.sort_by(|a, b| a.rt.partial_cmp(&b.rt).unwrap_or(Ordering::Equal));
+    let rt = scans.iter().map(|s| s.rt).collect::<Vec<_>>();
+    (rt, scans)
+}
+
+fn max_in_range(rt: &[f64], y: &[f64], from_rt: f64, to_rt: f64) -> f64 {
+    let i0 = lower_bound(rt, from_rt);
+    let mut i1 = upper_bound(rt, to_rt);
+    if i0 >= y.len() {
+        return 0.0;
+    }
+    if i1 > y.len() {
+        i1 = y.len();
+    }
+    if i1 <= i0 {
+        return 0.0;
+    }
+    let mut m = y[i0];
+    let mut i = i0 + 1;
+    while i < i1 {
+        let v = y[i];
+        if v > m {
+            m = v;
+        }
+        i += 1;
+    }
+    m
+}
+
+pub fn with_eic_apex_intensity(rt: &[f64], y: &[f64], mut p: Peak) -> Peak {
+    let a = max_in_range(rt, y, p.from, p.to);
+    if a.is_finite() && a > 0.0 {
+        p.intensity = a;
+    }
+    p
 }
 
 #[inline]
-fn lower_bound(a: &[f64], x: f64) -> usize {
+pub fn lower_bound(a: &[f64], x: f64) -> usize {
     let mut lo = 0usize;
     let mut hi = a.len();
     while lo < hi {
@@ -143,7 +208,7 @@ fn lower_bound(a: &[f64], x: f64) -> usize {
 }
 
 #[inline]
-fn upper_bound(a: &[f64], x: f64) -> usize {
+pub fn upper_bound(a: &[f64], x: f64) -> usize {
     let mut lo = 0usize;
     let mut hi = a.len();
     while lo < hi {

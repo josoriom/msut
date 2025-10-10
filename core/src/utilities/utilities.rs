@@ -104,7 +104,7 @@ pub fn quad_peak(xs: &[f64], ys: &[f64], i: usize) -> f64 {
     }
 }
 
-pub fn xy_integration(x: &[f64], y: &[f32]) -> (f64, f64) {
+pub fn xy_integration(x: &[f64], y: &[f64]) -> (f64, f64) {
     let n = x.len();
     if n == 0 || n != y.len() {
         return (0.0, f64::NEG_INFINITY);

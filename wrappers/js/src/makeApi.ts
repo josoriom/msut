@@ -1,5 +1,4 @@
 import { makeParseMzML, ParseMzML } from "./utilities/parseMzML.js";
-import { calculateEic } from "./utilities/calculateEic.js";
 
 export type FindPeaksOptions = {
   integralThreshold?: number;
@@ -7,6 +6,9 @@ export type FindPeaksOptions = {
   widthThreshold?: number;
   noise?: number;
   autoNoise?: boolean;
+  autoBaseline?: boolean;
+  baselineWindow?: number;
+  baselineWindowFactor?: number;
   allowOverlap?: boolean;
   windowSize?: number;
   snRatio?: number;
@@ -46,7 +48,14 @@ export type EicPeakRow = {
 
 export interface Exports {
   parseMzML: ParseMzML;
-  calculateEic: typeof calculateEic;
+  calculateEic: (
+    bin: Uint8Array,
+    targets: number,
+    from: number,
+    to: number,
+    ppmTol?: number,
+    mzTol?: number
+  ) => { x: Float64Array; y: Float32Array };
 
   getPeak: (
     x: Float64Array,
@@ -76,11 +85,7 @@ export interface Exports {
     y: Float32Array,
     options?: FindPeaksOptions
   ) => Peak[];
-  scanForPeaks: (
-    x: Float64Array,
-    y: Float32Array,
-    options?: { epsilon?: number; windowSize?: number }
-  ) => Float64Array;
+
   findNoiseLevel: (y: Float32Array) => number;
 
   __debug: {
@@ -106,7 +111,7 @@ function pickFn<T extends Function>(ex: ExportsLike, names: string[]): T {
 }
 
 const BUF_PAIR_BYTES = 8;
-const SIZE_COPTS = 48;
+const SIZE_COPTS = 64;
 
 export function makeApi(instanceOrModule: any): Exports {
   const ex = getExports(instanceOrModule);
@@ -137,15 +142,6 @@ export function makeApi(instanceOrModule: any): Exports {
     optionsPtr: number,
     outJsonBuf: number
   ) => number = pickFn(ex, ["find_peaks"]);
-
-  const scan_for_peaks: (
-    xPtr: number,
-    yPtr: number,
-    len: number,
-    epsilon: number,
-    windowSize: number,
-    outBuf: number
-  ) => number = pickFn(ex, ["scan_for_peaks"]);
 
   const get_peak: (
     xPtr: number,
@@ -190,6 +186,19 @@ export function makeApi(instanceOrModule: any): Exports {
   const find_noise_level: (yPtr: number, len: number) => number = pickFn(ex, [
     "find_noise_level",
   ]);
+
+  const calculate_eic: (
+    binPtr: number,
+    binLen: number,
+    targetPtr: number,
+    targetLen: number,
+    from: number,
+    to: number,
+    ppmTol: number,
+    mzTol: number,
+    outXBuf: number,
+    outYBuf: number
+  ) => number = pickFn(ex, ["calculate_eic"]);
 
   let HEAPU8 = new Uint8Array(memory.buffer);
   let HEAPDV = new DataView(memory.buffer);
@@ -244,6 +253,9 @@ export function makeApi(instanceOrModule: any): Exports {
       HEAPDV.setInt32(ptr + 36, 0, true);
       HEAPDV.setInt32(ptr + 40, 0, true);
       HEAPDV.setInt32(ptr + 44, 0, true);
+      HEAPDV.setInt32(ptr + 48, 0, true);
+      HEAPDV.setInt32(ptr + 52, 0, true);
+      HEAPDV.setFloat64(ptr + 56, Number.NaN, true);
       return;
     }
     HEAPDV.setFloat64(
@@ -271,15 +283,28 @@ export function makeApi(instanceOrModule: any): Exports {
       true
     );
     HEAPDV.setInt32(ptr + 32, o.autoNoise ? 1 : 0, true);
-    HEAPDV.setInt32(ptr + 36, o.allowOverlap ? 1 : 0, true);
+    HEAPDV.setInt32(ptr + 36, o.autoBaseline ? 1 : 0, true);
     HEAPDV.setInt32(
       ptr + 40,
-      typeof o.windowSize === "number" ? o.windowSize | 0 : 0,
+      typeof o.baselineWindow === "number" ? o.baselineWindow | 0 : 0,
       true
     );
     HEAPDV.setInt32(
       ptr + 44,
-      typeof o.snRatio === "number" ? o.snRatio | 0 : 0,
+      typeof o.baselineWindowFactor === "number"
+        ? o.baselineWindowFactor | 0
+        : 0,
+      true
+    );
+    HEAPDV.setInt32(ptr + 48, o.allowOverlap ? 1 : 0, true);
+    HEAPDV.setInt32(
+      ptr + 52,
+      typeof o.windowSize === "number" ? o.windowSize | 0 : 0,
+      true
+    );
+    HEAPDV.setFloat64(
+      ptr + 56,
+      typeof o.snRatio === "number" ? o.snRatio : Number.NaN,
       true
     );
   };
@@ -405,35 +430,13 @@ export function makeApi(instanceOrModule: any): Exports {
     return JSON.parse(td.decode(bytes));
   };
 
-  const buildIdTable = (ids: (string | undefined | null)[]) => {
-    const offs = new Uint32Array(ids.length);
-    const lens = new Uint32Array(ids.length);
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    for (let i = 0; i < ids.length; i++) {
-      const s = (ids[i] ?? "") + "";
-      const b = te.encode(s);
-      offs[i] = total >>> 0;
-      lens[i] = b.length >>> 0;
-      chunks.push(b);
-      total += b.length;
-    }
-    const buf = new Uint8Array(total);
-    let pos = 0;
-    for (const c of chunks) {
-      buf.set(c, pos);
-      pos += c.length;
-    }
-    return { offs, lens, buf };
-  };
-
   type EicItem = {
     id?: string;
     rt: number;
     mz: number;
-    range?: number; // preferred name
-    sd?: number; // accepted alias
-    window?: number; // accepted alias
+    range?: number;
+    sd?: number;
+    window?: number;
   };
 
   const TE: TextEncoder =
@@ -451,12 +454,10 @@ export function makeApi(instanceOrModule: any): Exports {
     const n = items.length;
     if (n === 0) return [];
 
-    // Build numeric arrays
     const rts = new Float64Array(n);
     const mzs = new Float64Array(n);
     const ranges = new Float64Array(n);
 
-    // Build id buffer + offsets/lengths
     const idStrings = new Array<string>(n);
     for (let i = 0; i < n; i++) {
       const it = items[i] ?? ({} as any);
@@ -468,11 +469,11 @@ export function makeApi(instanceOrModule: any): Exports {
         (typeof it.window === "number" && it.window > 0
           ? it.window
           : undefined) ??
-        0.25; // default fallback
+        0.25;
       ranges[i] = rng;
       idStrings[i] = typeof it.id === "string" ? it.id : "";
     }
-    // UTF-8 pack ids
+
     const encodedIds = idStrings.map((s) => TE.encode(s));
     let idsBufLen = 0;
     for (const b of encodedIds) idsBufLen += b.length;
@@ -490,7 +491,6 @@ export function makeApi(instanceOrModule: any): Exports {
       }
     }
 
-    // Write inputs to wasm heap
     const binPtr = alloc(bin.length);
     heapWrite(binPtr, bin);
 
@@ -604,44 +604,6 @@ export function makeApi(instanceOrModule: any): Exports {
     return JSON.parse(td.decode(bytes));
   };
 
-  const scanForPeaks = (
-    x: Float64Array,
-    y: Float32Array,
-    options: { epsilon?: number; windowSize?: number } = {}
-  ) => {
-    const { epsilon = 1e-5, windowSize = 15 } = options;
-    if (!(x instanceof Float64Array))
-      throw new Error("scanForPeaks: x must be Float64Array");
-    if (!(y instanceof Float32Array))
-      throw new Error("scanForPeaks: y must be Float32Array");
-    if (x.length !== y.length)
-      throw new Error("scanForPeaks: x,y length mismatch");
-
-    const xb = new Uint8Array(x.buffer, x.byteOffset, x.byteLength);
-    const yb = new Uint8Array(y.buffer, y.byteOffset, y.byteLength);
-    const xp = alloc(xb.length);
-    const yp = alloc(yb.length);
-    heapWrite(xp, xb);
-    heapWrite(yp, yb);
-
-    const rc = scan_for_peaks(
-      xp,
-      yp,
-      x.length,
-      epsilon,
-      windowSize | 0,
-      SCRATCH_PEAKS
-    );
-    free(xp, xb.length);
-    free(yp, yb.length);
-    if (rc !== 0) throw new Error(`scan_for_peaks failed: ${rc}`);
-
-    const { ptr, len } = readBuf(SCRATCH_PEAKS);
-    const bytes = heapSlice(ptr, len);
-    free(ptr, len);
-    return new Float64Array(bytes.buffer, bytes.byteOffset, len / 8).slice();
-  };
-
   const findNoiseLevel = (y: Float32Array) => {
     const bytes = new Uint8Array(y.buffer, y.byteOffset, y.byteLength);
     const p = alloc(bytes.length);
@@ -651,6 +613,51 @@ export function makeApi(instanceOrModule: any): Exports {
     return noise;
   };
 
+  const calculateEic = (
+    bin: Uint8Array,
+    targets: number,
+    from: number,
+    to: number,
+    ppmTol: number = 20,
+    mzTol: number = 0.005
+  ) => {
+    const binPtr = alloc(bin.length);
+    heapWrite(binPtr, bin);
+
+    const tPtr = alloc(8);
+    refreshViews();
+    HEAPDV.setFloat64(tPtr + 0, +targets, true);
+
+    const rc = calculate_eic(
+      binPtr,
+      bin.length,
+      tPtr,
+      1,
+      from,
+      to,
+      ppmTol,
+      mzTol,
+      SCRATCH_A,
+      SCRATCH_BLOB
+    );
+
+    free(binPtr, bin.length);
+    free(tPtr, 8);
+
+    if (rc !== 0) throw new Error(`calculate_eic failed: ${rc}`);
+
+    const bx = readBuf(SCRATCH_A);
+    const by = readBuf(SCRATCH_BLOB);
+    const xb = heapSlice(bx.ptr, bx.len);
+    const yb = heapSlice(by.ptr, by.len);
+    free(bx.ptr, bx.len);
+    free(by.ptr, by.len);
+
+    const X = new Float64Array(xb.buffer, xb.byteOffset, xb.length / 8).slice();
+    const Y = new Float32Array(yb.buffer, yb.byteOffset, yb.length / 4).slice();
+    return { x: X, y: Y };
+  };
+
   return {
     parseMzML,
     calculateEic,
@@ -658,7 +665,6 @@ export function makeApi(instanceOrModule: any): Exports {
     getPeaksFromChrom,
     getPeaksFromEic,
     findPeaks,
-    scanForPeaks,
     findNoiseLevel,
     __debug: { memory, exports: ex, heapBytes: () => memory.buffer.byteLength },
   };

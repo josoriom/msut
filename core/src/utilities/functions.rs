@@ -5,7 +5,7 @@ use std::f64::consts::{LN_2, PI, SQRT_2};
 /// ## Gaussian
 /// Wikipedia https://en.wikipedia.org/wiki/Gaussian_function
 /// ### Function
-/// f(rt) = h * exp( - (rt-μ)^2 / (2σ^2) )
+/// f(rt) = h * exp( - (rt-μ)^2 / (2σ^2))
 pub fn gaussian_fn(rt: f64, h: f64, mu: f64, sigma: f64) -> f64 {
     let sigma = sigma.max(1e-12);
     let d = rt - mu;
@@ -15,7 +15,7 @@ pub fn gaussian_fn(rt: f64, h: f64, mu: f64, sigma: f64) -> f64 {
 /// ## Exponentially modified Gaussian distribution
 /// https://en.wikipedia.org/wiki/Exponentially_modified_Gaussian_distribution
 /// ### Function
-/// f(rt; h, μ, σ, τ) = (h σ / τ) * sqrt(π/2) * exp( 0.5*(σ/τ)^2 - (rt - μ)/τ ) * erfc( (1/sqrt(2)) * ( σ/τ - (rt - μ)/σ ) )
+/// f(rt; h, μ, σ, τ) = (h σ / τ) * sqrt(π/2) * exp(0.5*(σ/τ)^2 - (rt - μ)/τ) * erfc( (1/√2) * (σ/τ - (rt - μ)/σ ))
 pub fn emg_fn(rt: f64, h: f64, mu: f64, sigma: f64, tau: f64) -> f64 {
     let sigma = sigma.max(1e-12);
     let tau = tau.max(1e-12);
@@ -32,6 +32,7 @@ fn erfcx(z: f64) -> f64 {
 
 #[inline]
 pub fn sigma_from_fwhm(fwhm: f64) -> f64 {
+    // fwhm = 2 * sqrt(2 ln 2) * sigma
     fwhm / (2.0 * (2.0 * LN_2).sqrt())
 }
 

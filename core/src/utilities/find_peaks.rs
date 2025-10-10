@@ -21,8 +21,6 @@ pub struct FilterPeaksOptions {
     pub auto_baseline: Option<bool>,
     pub allow_overlap: Option<bool>,
     pub sn_ratio: Option<f64>,
-    pub gaussian_filter: Option<bool>,
-    pub gaussian_iou_error_threshold: Option<f64>,
 }
 
 impl Default for FilterPeaksOptions {
@@ -36,8 +34,6 @@ impl Default for FilterPeaksOptions {
             auto_baseline: Some(false),
             allow_overlap: Some(false),
             sn_ratio: Some(1.0),
-            gaussian_filter: Some(true),
-            gaussian_iou_error_threshold: Some(0.3),
         }
     }
 }
@@ -63,7 +59,7 @@ impl From<PeakCandidate> for Peak {
             integral: c.integral,
             intensity: c.intensity,
             ratio: c.ratio,
-            np: c.number_of_points as i32,
+            np: c.number_of_points,
             noise: c.noise,
         }
     }
@@ -92,7 +88,7 @@ pub fn find_peaks(data: &DataXY, options: Option<FindPeaksOptions>) -> Vec<Peak>
     let filter_opts = o.filter_peaks_options.unwrap_or_default();
     let base_opts = o.baseline_options.unwrap_or_default();
 
-    let y64: Vec<f64> = data.y.iter().map(|&v| v as f64).collect();
+    let y64: Vec<f64> = data.y.clone();
     let floor = if filter_opts.auto_baseline.unwrap_or(false) {
         let mut b = base_opts.clone();
         b.level = Some(0);
@@ -120,7 +116,7 @@ pub fn find_peaks(data: &DataXY, options: Option<FindPeaksOptions>) -> Vec<Peak>
 
     let normalized_data = DataXY {
         x: data.x.clone(),
-        y: y_center.iter().copied().map(|v| v as f32).collect(),
+        y: y_center,
     };
 
     let positions = scan_for_peaks_across_windows(
@@ -138,10 +134,8 @@ pub fn find_peaks(data: &DataXY, options: Option<FindPeaksOptions>) -> Vec<Peak>
     for seed_rt in positions {
         let b = get_boundaries(&normalized_data, seed_rt, Some(bopt));
         let seed_idx = closest_index(&normalized_data.x, seed_rt);
-        let (rt, apex_y) = apex_in_window(&normalized_data, &b).unwrap_or((
-            normalized_data.x[seed_idx],
-            normalized_data.y[seed_idx] as f64,
-        ));
+        let (rt, apex_y) = apex_in_window(&normalized_data, &b)
+            .unwrap_or((normalized_data.x[seed_idx], normalized_data.y[seed_idx]));
 
         if apex_y <= noise {
             continue;
@@ -168,8 +162,6 @@ pub fn find_peaks(data: &DataXY, options: Option<FindPeaksOptions>) -> Vec<Peak>
     if candidates.is_empty() {
         return Vec::new();
     }
-
-    // println!("{candidates:?}");
 
     let mut max_intensity = 0.0f64;
     for c in &candidates {
@@ -213,7 +205,7 @@ pub fn apex_in_window(data: &DataXY, b: &Boundaries) -> Option<(f64, f64)> {
         .enumerate()
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(Ordering::Equal))?;
     let i = l + off;
-    Some((data.x[i], ymax as f64))
+    Some((data.x[i], ymax))
 }
 
 fn filter_peak_candidates(peaks: Vec<PeakCandidate>, opt: FilterPeaksOptions) -> Vec<Peak> {

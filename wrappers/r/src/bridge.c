@@ -35,6 +35,9 @@ typedef struct
   int32_t width_threshold;
   double noise;
   int32_t auto_noise;
+  int32_t auto_baseline;
+  int32_t baseline_window;
+  int32_t baseline_window_factor;
   int32_t allow_overlap;
   int32_t window_size;
   double sn_ratio;
@@ -42,12 +45,12 @@ typedef struct
 
 typedef int32_t (*fn_parse_mzml)(const unsigned char *, size_t, Buf *);
 typedef int32_t (*fn_bin_to_json)(const unsigned char *, size_t, Buf *);
-typedef int32_t (*fn_get_peak)(const double *, const float *, size_t, double, double, const CPeakPOptions *, Buf *);
-typedef int32_t (*fn_calculate_eic)(const unsigned char *, size_t, const unsigned char *, size_t, double, double, double, double, Buf *, Buf *);
+typedef int32_t (*fn_get_peak)(const double *, const double *, size_t, double, double, const CPeakPOptions *, Buf *);
+typedef int32_t (*fn_calculate_eic)(const unsigned char *, size_t, double, double, double, double, double, Buf *, Buf *);
 typedef float (*fn_find_noise_level)(const float *, size_t);
 typedef int32_t (*fn_get_peaks_from_eic)(const unsigned char *, size_t, const double *, const double *, const double *, const uint32_t *, const uint32_t *, const unsigned char *, size_t, size_t, double, double, const CPeakPOptions *, size_t, Buf *);
 typedef int32_t (*fn_get_peaks_from_chrom)(const unsigned char *, size_t, const uint32_t *, const double *, const double *, size_t, const CPeakPOptions *, size_t, Buf *);
-typedef int32_t (*fn_find_peaks)(const double *, const float *, size_t, const CPeakPOptions *, Buf *);
+typedef int32_t (*fn_find_peaks)(const double *, const double *, size_t, const CPeakPOptions *, Buf *);
 typedef void (*fn_free_)(unsigned char *, size_t);
 
 typedef struct
@@ -191,6 +194,9 @@ static int fill_options(SEXP opts, CPeakPOptions *out)
   out->width_threshold = 0;
   out->noise = NAN;
   out->auto_noise = 0;
+  out->auto_baseline = 0;
+  out->baseline_window = 0;
+  out->baseline_window_factor = 0;
   out->allow_overlap = 0;
   out->window_size = 0;
   out->sn_ratio = NAN;
@@ -210,6 +216,15 @@ static int fill_options(SEXP opts, CPeakPOptions *out)
   v = list_get(opts, "auto_noise");
   if (v != R_NilValue)
     out->auto_noise = (int32_t)asLogical(v);
+  v = list_get(opts, "auto_baseline");
+  if (v != R_NilValue)
+    out->auto_baseline = (int32_t)asLogical(v);
+  v = list_get(opts, "baseline_window");
+  if (v != R_NilValue)
+    out->baseline_window = (int32_t)asInteger(v);
+  v = list_get(opts, "baseline_window_factor");
+  if (v != R_NilValue)
+    out->baseline_window_factor = (int32_t)asInteger(v);
   v = list_get(opts, "allow_overlap");
   if (v != R_NilValue)
     out->allow_overlap = (int32_t)asLogical(v);
@@ -296,14 +311,11 @@ SEXP C_get_peak(SEXP x, SEXP y, SEXP rt, SEXP range, SEXP options)
   REQUIRE_BOUND(ABI.get_peak, "get_peak");
   REQUIRE_BOUND(ABI.free_, "free_");
   R_xlen_t n = XLENGTH(y);
-  float *fy = (float *)R_alloc((size_t)n, sizeof(float));
-  for (R_xlen_t i = 0; i < n; i++)
-    fy[i] = (float)REAL(y)[i];
   CPeakPOptions opts;
   const CPeakPOptions *opt_ptr = NULL;
   (void)as_opts_ptr(options, &opts, &opt_ptr);
   Buf out = (Buf){0};
-  int code = ABI.get_peak(REAL(x), fy, (size_t)n, asReal(rt), asReal(range), opt_ptr, &out);
+  int code = ABI.get_peak(REAL(x), REAL(y), (size_t)n, asReal(rt), asReal(range), opt_ptr, &out);
   die_code("get_peak", code);
   SEXP res = mk_string_len(out.ptr, out.len);
   ABI.free_(out.ptr, out.len);
@@ -431,32 +443,25 @@ SEXP C_calculate_eic(SEXP bin, SEXP targets, SEXP from, SEXP to, SEXP ppm_tol, S
 {
   if (TYPEOF(bin) != RAWSXP)
     error("bin");
-  if (TYPEOF(targets) != STRSXP || LENGTH(targets) != 1)
+  if ((TYPEOF(targets) != REALSXP && TYPEOF(targets) != INTSXP) || LENGTH(targets) != 1)
     error("targets");
   REQUIRE_BOUND(ABI.calculate_eic, "calculate_eic");
   REQUIRE_BOUND(ABI.free_, "free_");
-  const char *t = CHAR(STRING_ELT(targets, 0));
-  size_t tlen = strlen(t);
+  double t = asReal(targets);
   Buf bx = (Buf){0}, by = (Buf){0};
   int code = ABI.calculate_eic(
       (const unsigned char *)RAW(bin), (size_t)XLENGTH(bin),
-      (const unsigned char *)t, tlen,
+      t,
       asReal(from), asReal(to),
       asReal(ppm_tol), asReal(mz_tol),
       &bx, &by);
   die_code("calculate_eic", code);
   size_t nx = bx.len / 8;
+  size_t ny = by.len / 8;
   SEXP Rx = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)nx));
-  memcpy(REAL(Rx), bx.ptr, bx.len);
-  size_t ny = by.len / 4;
   SEXP Ry = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)ny));
-  for (size_t i = 0; i < ny; i++)
-  {
-    float fv;
-    memcpy(&fv, by.ptr + 4 * i, 4);
-    REAL(Ry)
-    [i] = (double)fv;
-  }
+  memcpy(REAL(Rx), bx.ptr, bx.len);
+  memcpy(REAL(Ry), by.ptr, by.len);
   ABI.free_(bx.ptr, bx.len);
   ABI.free_(by.ptr, by.len);
   SEXP out = PROTECT(Rf_allocVector(VECSXP, 2));
@@ -479,14 +484,11 @@ SEXP C_find_peaks(SEXP x, SEXP y, SEXP options)
   REQUIRE_BOUND(ABI.find_peaks, "find_peaks");
   REQUIRE_BOUND(ABI.free_, "free_");
   R_xlen_t n = XLENGTH(y);
-  float *fy = (float *)R_alloc((size_t)n, sizeof(float));
-  for (R_xlen_t i = 0; i < n; i++)
-    fy[i] = (float)REAL(y)[i];
   CPeakPOptions opts;
   const CPeakPOptions *opt_ptr = NULL;
   (void)as_opts_ptr(options, &opts, &opt_ptr);
   Buf out = (Buf){0};
-  int code = ABI.find_peaks(REAL(x), fy, (size_t)n, opt_ptr, &out);
+  int code = ABI.find_peaks(REAL(x), REAL(y), (size_t)n, opt_ptr, &out);
   die_code("find_peaks", code);
   SEXP res = mk_string_len(out.ptr, out.len);
   ABI.free_(out.ptr, out.len);

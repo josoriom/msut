@@ -69,7 +69,7 @@ pub fn approx_eq(a: f64, b: f64, tol: f64) -> bool {
 }
 
 #[allow(dead_code)]
-pub fn data_xy(xs: Vec<f64>, ys: Vec<f32>) -> DataXY {
+pub fn data_xy(xs: Vec<f64>, ys: Vec<f64>) -> DataXY {
     DataXY { x: xs, y: ys }
 }
 

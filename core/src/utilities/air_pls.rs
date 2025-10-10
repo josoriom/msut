@@ -32,7 +32,7 @@ impl Default for AirPlsOptions {
         Self {
             max_iterations: 100,
             lambda: 10.0,
-            tolerance: 0.001,
+            tolerance: 0.01,
             control_points: None,
             zones: None,
             weights: None,

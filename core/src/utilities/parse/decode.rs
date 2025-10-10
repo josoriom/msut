@@ -1,7 +1,7 @@
 use serde_json;
 
 use crate::utilities::parse::{
-    helper::{rd_f64, rd_u32, rd_u64, read_array_as_f32, read_array_as_f64},
+    helper::{rd_f64, rd_u32, rd_u64, read_array_as_f64},
     parse_mzml::{ChromatogramSummary, MzML, Precursor, Run, SpectrumSummary},
 };
 
@@ -169,13 +169,13 @@ pub fn decode(bin: &[u8]) -> Result<MzML, String> {
             spectra[i].mz_array = read_array_as_f64(bin, *x_off, *x_len, sx)?;
         }
         for (i, (_, _, y_off, y_len)) in sidx.iter().enumerate() {
-            spectra[i].intensity_array = read_array_as_f32(bin, *y_off, *y_len, sy)?;
+            spectra[i].intensity_array = read_array_as_f64(bin, *y_off, *y_len, sy)?;
         }
         for (i, (x_off, x_len, _, _)) in cidx.iter().enumerate() {
             chroms[i].time_array = read_array_as_f64(bin, *x_off, *x_len, cx)?;
         }
         for (i, (_, _, y_off, y_len)) in cidx.iter().enumerate() {
-            chroms[i].intensity_array = read_array_as_f32(bin, *y_off, *y_len, cy)?;
+            chroms[i].intensity_array = read_array_as_f64(bin, *y_off, *y_len, cy)?;
         }
 
         for (i, (off, len)) in ids.into_iter().enumerate() {
@@ -226,7 +226,7 @@ pub fn decode(bin: &[u8]) -> Result<MzML, String> {
             spectra[i].array_length = n.max(spectra[i].array_length);
         }
         for (i, (_, _, y_off, y_len)) in sidx.iter().enumerate() {
-            let a = read_array_as_f32(bin, *y_off, *y_len, sy)?;
+            let a = read_array_as_f64(bin, *y_off, *y_len, sy)?;
             let n = a.as_ref().map(|v| v.len()).unwrap_or(0);
             spectra[i].intensity_array = a;
             spectra[i].array_length = n.max(spectra[i].array_length);
@@ -238,7 +238,7 @@ pub fn decode(bin: &[u8]) -> Result<MzML, String> {
             chroms[i].array_length = n.max(chroms[i].array_length);
         }
         for (i, (_, _, y_off, y_len)) in cidx.iter().enumerate() {
-            let a = read_array_as_f32(bin, *y_off, *y_len, cy)?;
+            let a = read_array_as_f64(bin, *y_off, *y_len, cy)?;
             let n = a.as_ref().map(|v| v.len()).unwrap_or(0);
             chroms[i].intensity_array = a;
             chroms[i].array_length = n.max(chroms[i].array_length);

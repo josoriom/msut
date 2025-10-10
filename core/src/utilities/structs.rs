@@ -3,7 +3,7 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 pub struct DataXY {
     pub x: Vec<f64>,
-    pub y: Vec<f32>,
+    pub y: Vec<f64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -20,7 +20,7 @@ pub struct Peak {
     pub integral: f64,
     pub intensity: f64,
     pub ratio: f64,
-    pub np: i32,
+    pub np: usize,
     pub noise: f64,
 }
 

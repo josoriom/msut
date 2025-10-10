@@ -49,18 +49,27 @@ export function parseMzML(
 export type EicResult = { x: number[]; y: number[] };
 
 export const calculateEic = (
-  source: MzML,
+  source: Uint8Array | ArrayBuffer,
   targetMass: number | string,
   fromTo: { from: number; to: number },
   options: { ppmTolerance?: number; mzTolerance?: number } = {}
 ): EicResult => {
   if (!MOD) throw new Error("ms-utils WASM not initialized");
-  return freshInstance({}).calculateEic(
-    source,
-    targetMass,
-    fromTo,
-    options
-  ) as EicResult;
+  const bin =
+    source instanceof Uint8Array
+      ? source
+      : new Uint8Array(source as ArrayBuffer);
+  const mass =
+    typeof targetMass === "string" ? Number(targetMass) : +targetMass;
+  const { x, y } = freshInstance({}).calculateEic(
+    bin,
+    mass,
+    fromTo.from,
+    fromTo.to,
+    options.ppmTolerance ?? 20,
+    options.mzTolerance ?? 0.005
+  );
+  return { x: Array.from(x), y: Array.from(y) };
 };
 
 export const getPeak = (

@@ -20,7 +20,7 @@ pub struct SpectrumSummary {
     pub base_peak_intensity: Option<f64>,
     pub base_peak_mz: Option<f64>,
     pub mz_array: Option<Vec<f64>>,
-    pub intensity_array: Option<Vec<f32>>,
+    pub intensity_array: Option<Vec<f64>>,
     pub precursor: Option<Precursor>,
 }
 
@@ -131,7 +131,7 @@ pub struct ChromatogramSummary {
     pub index: usize,
     pub array_length: usize,
     pub time_array: Option<Vec<f64>>,
-    pub intensity_array: Option<Vec<f32>>,
+    pub intensity_array: Option<Vec<f64>>,
     pub id: String,
 }
 
@@ -902,8 +902,7 @@ fn parse_spectrum_block(block: &[u8], scratch: &mut Scratch) -> Option<SpectrumS
             let mut tic_val: f64 = 0.0;
             let mut bpi_val: f64 = 0.0;
             let mut bpmz_val: f64 = 0.0;
-            for (mzv, &intv_f32) in mz.iter().zip(inten.iter()) {
-                let intv = intv_f32 as f64;
+            for (mzv, &intv) in mz.iter().zip(inten.iter()) {
                 tic_val += intv;
                 if intv > bpi_val {
                     bpi_val = intv;
@@ -1049,9 +1048,9 @@ fn decode_binary_arrays(
     block: &[u8],
     expected_len: usize,
     scratch: &mut Scratch,
-) -> (Option<Vec<f64>>, Option<Vec<f32>>) {
+) -> (Option<Vec<f64>>, Option<Vec<f64>>) {
     let mut mz: Option<Vec<f64>> = None;
-    let mut inten: Option<Vec<f32>> = None;
+    let mut inten: Option<Vec<f64>> = None;
 
     let mut cur = 0usize;
     let bda_open = memmem::Finder::new(b"<binaryDataArray");
@@ -1116,9 +1115,9 @@ fn decode_binary_arrays(
                 mz = Some(vals);
             } else if kind_int {
                 let vals = if is_f32 {
-                    bytes_to_f32_exact_into(bytes, little, want)
+                    bytes_to_f32_as_f64_exact_into(bytes, little, want)
                 } else if is_f64 {
-                    bytes_to_f64_as_f32_exact_into(bytes, little, want)
+                    bytes_to_f64_exact_into(bytes, little, want)
                 } else {
                     Vec::new()
                 };
@@ -1172,9 +1171,9 @@ fn decode_chrom_binary_arrays(
     block: &[u8],
     expected_len: usize,
     scratch: &mut Scratch,
-) -> (Option<Vec<f64>>, Option<Vec<f32>>) {
+) -> (Option<Vec<f64>>, Option<Vec<f64>>) {
     let mut time_arr: Option<Vec<f64>> = None;
-    let mut intensity_arr: Option<Vec<f32>> = None;
+    let mut intensity_arr: Option<Vec<f64>> = None;
 
     let mut cur = 0usize;
     let bda_open = memmem::Finder::new(b"<binaryDataArray");
@@ -1239,9 +1238,9 @@ fn decode_chrom_binary_arrays(
                 time_arr = Some(vals);
             } else if kind_int {
                 let vals = if is_f32 {
-                    bytes_to_f32_exact_into(bytes, little, want)
+                    bytes_to_f32_as_f64_exact_into(bytes, little, want)
                 } else if is_f64 {
-                    bytes_to_f64_as_f32_exact_into(bytes, little, want)
+                    bytes_to_f64_exact_into(bytes, little, want)
                 } else {
                     Vec::new()
                 };
@@ -1374,36 +1373,6 @@ fn tag_body(hay: &[u8], open: &[u8], close: &[u8]) -> Option<(usize, usize)> {
 
 fn is_ws(b: u8) -> bool {
     matches!(b, b' ' | b'\n' | b'\r' | b'\t')
-}
-
-fn bytes_to_f32_exact_into(b: &[u8], little: bool, want: usize) -> Vec<f32> {
-    let len = want.min(b.len() / 4);
-    let mut out = Vec::with_capacity(len);
-    let words = &b[..len * 4];
-    for c in words.chunks_exact(4) {
-        let bits = if little {
-            u32::from_le_bytes([c[0], c[1], c[2], c[3]])
-        } else {
-            u32::from_be_bytes([c[0], c[1], c[2], c[3]])
-        };
-        out.push(f32::from_bits(bits));
-    }
-    out
-}
-
-fn bytes_to_f64_as_f32_exact_into(b: &[u8], little: bool, want: usize) -> Vec<f32> {
-    let len = want.min(b.len() / 8);
-    let mut out = Vec::with_capacity(len);
-    let bytes = &b[..len * 8];
-    for c in bytes.chunks_exact(8) {
-        let bits = if little {
-            u64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]])
-        } else {
-            u64::from_be_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]])
-        };
-        out.push(f64::from_bits(bits) as f32);
-    }
-    out
 }
 
 fn bytes_to_f64_exact_into(b: &[u8], little: bool, want: usize) -> Vec<f64> {

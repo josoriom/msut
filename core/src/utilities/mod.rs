@@ -4,6 +4,9 @@ pub use air_pls::air_pls;
 pub mod calculate_eic;
 pub use calculate_eic::{Eic, EicOptions, calculate_eic_from_bin1, calculate_eic_from_mzml};
 
+pub mod find_features;
+pub use find_features::find_features;
+
 pub mod find_noise_level;
 pub use find_noise_level::find_noise_level;
 
